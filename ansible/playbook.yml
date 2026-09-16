@@ -4,17 +4,18 @@
 # =============================================================================
 # Usa hosts: all porque o inventário é passado inline pelo workflow.
 #
+# Cache do DNF:
+#   O user_data.sh pode deixar o cache do DNF em estado inconsistente
+#   (metadados apontando para arquivos .rpm que não existem no disco).
+#   `dnf clean all` NÃO resolve isso — o diretório /var/cache/dnf/ inteiro
+#   precisa ser removido para o DNF recriá-lo do zero.
+#
 # Docker:
-#   - Limpa cache do DNF (execuções anteriores podem deixar resíduo)
-#   - Verifica se `docker` existe no PATH (não depende do systemd)
-#   - Se não existe, instala com --allowerasing (resolve curl/curl-minimal)
-#   - Só depois pede ao systemd para habilitar/iniciar
+#   Verifica `which docker`. Se não existe, limpa o cache, instala com
+#   --allowerasing, e só depois habilita o serviço via systemd.
 #
-# kind/kubectl/namespaces rodam como root (become: true), o que evita o
-# problema de permission denied no docker.sock (o ec2-user acabou de ser
-# adicionado ao grupo docker, mas o grupo só vale em novas sessões SSH).
-#
-# No fim, o kubeconfig do root é copiado para o ec2-user.
+# kind/kubectl/namespaces rodam como root (become: true) para evitar
+# permission denied no docker.sock.
 # =============================================================================
 
 - name: Configurar EC2 para o lab de CD
@@ -29,18 +30,29 @@
 
   tasks:
     # =========================================================================
-    # 1) Limpar cache do DNF
+    # 1) Remover diretório de cache do DNF
     # =========================================================================
-    - name: Limpar cache do DNF
+    # Não usar `dnf clean all`: ele não remove arquivos órfãos que o DNF
+    # deixou em /var/cache/dnf após uma interrupção. Remover o diretório
+    # inteiro força o DNF a recriar tudo na próxima operação.
+    - name: Remover diretório de cache do DNF
       become: true
-      command: dnf clean all
-      changed_when: false
+      file:
+        path: /var/cache/dnf
+        state: absent
+
+    - name: Recriar diretório de cache do DNF vazio
+      become: true
+      file:
+        path: /var/cache/dnf
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
 
     # =========================================================================
     # 2) Docker — verifica o binário, instala se necessário
     # =========================================================================
-    # `which docker` não falha se não achar (failed_when: false).
-    # O rc é 0 se achou, != 0 se não achou.
     - name: Verificar se o binário docker existe
       command: which docker
       register: docker_bin
