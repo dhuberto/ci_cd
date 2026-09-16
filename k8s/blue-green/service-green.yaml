@@ -1,0 +1,15 @@
+# Service do slot green — idem, usado pelo smoke test antes do switch.
+apiVersion: v1
+kind: Service
+metadata:
+  name: todolist-green
+  namespace: blue-green
+spec:
+  type: ClusterIP
+  selector:
+    app: todolist
+    slot: green
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000
