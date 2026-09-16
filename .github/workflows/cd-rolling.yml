@@ -1,0 +1,108 @@
+# Pipeline de Rolling Update.
+# Fluxo: build+push da imagem → aplicar manifestos → rollout status → smoke test.
+name: CD - Rolling Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Tag da imagem (SHA do commit ou 'latest')"
+        required: true
+        default: latest
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: rolling-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Imagem no GHCR: ghcr.io/<owner>/<repo>:<tag>.
+  IMAGE_NAME: ghcr.io/${{ github.repository }}:${{ inputs.image_tag }}
+
+jobs:
+  # Job 1 — builda a imagem do ci_cd e empurra para o GHCR.
+  build-and-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    environment: aws
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.image_tag }}
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+
+      # Login no GHCR com GITHUB_TOKEN — não precisa de secret extra.
+      - name: Login GHCR
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE_NAME }}
+
+  # Job 2 — aplica o manifesto na EC2 via SSH e valida com smoke test.
+  deploy:
+    name: Rolling deploy
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: aws
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Configurar chave SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      # Substitui o placeholder da imagem pelo nome real no manifesto.
+      - name: Renderizar manifesto com a imagem
+        run: |
+          sed -i "s|IMAGE_PLACEHOLDER|${{ env.IMAGE_NAME }}|g" k8s/rolling/deployment.yaml
+
+      - name: Copiar manifestos
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }} "mkdir -p ~/rolling"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            k8s/rolling/*.yaml \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }}:/home/ec2-user/rolling/
+
+      # Aplica e espera o rollout completar (o k8s respeita maxSurge/maxUnavailable).
+      - name: Aplicar e aguardar rollout
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }} \
+            'export PATH=$PATH:/usr/local/bin; \
+             kubectl apply -f /home/ec2-user/rolling/; \
+             kubectl -n rolling rollout status deploy/todolist --timeout=180s'
+
+      # Smoke test via Ingress: prova que o caminho usuário → nginx → pod funciona.
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Host: rolling.local" \
+              http://${{ vars.EC2_PUBLIC_IP }}/healthz || true)
+            if [ "$code" = "200" ]; then
+              echo "Smoke OK (tentativa $i)"
+              exit 0
+            fi
+            echo "tentativa $i — code=$code"
+            sleep 5
+          done
+          echo "Smoke test falhou" >&2
+          exit 1
