@@ -1,0 +1,17 @@
+# Único Service que o Ingress enxerga.
+# O switch de tráfego troca APENAS o selector deste Service — cutover mínimo
+# e reversível, sem recriar manifestos.
+apiVersion: v1
+kind: Service
+metadata:
+  name: todolist-active
+  namespace: blue-green
+spec:
+  type: ClusterIP
+  selector:
+    app: todolist
+    slot: blue          # <- trocado pelo workflow cd-blue-green-switch.yml
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000
