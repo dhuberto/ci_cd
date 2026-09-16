@@ -1,3 +1,17 @@
-output "instance_public_ip" { value = aws_instance.web.public_ip }
-output "instance_id"        { value = aws_instance.web.id }
-output "application_url"    { value = "http://${aws_instance.web.public_ip}" }
+# Outputs que o workflow consome via `terraform output -raw <nome>`
+# para alimentar jobs seguintes sem IP hardcoded.
+
+output "instance_public_ip" {
+  description = "IP público da EC2"
+  value       = aws_instance.web.public_ip
+}
+
+output "instance_id" {
+  description = "ID da instância"
+  value       = aws_instance.web.id
+}
+
+output "application_url" {
+  description = "URL base da aplicação"
+  value       = "http://${aws_instance.web.public_ip}"
+}
