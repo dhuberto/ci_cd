@@ -19,8 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Tag da imagem: usa o input. Se for 'latest', gera automaticamente
-  # a partir do SHA curto do commit atual (mais rastreável).
+  # Se o input for 'latest', usa o SHA do commit. Caso contrário, usa o valor informado.
   IMAGE_TAG: ${{ inputs.image_tag == 'latest' && github.sha || inputs.image_tag }}
   IMAGE_NAME: ghcr.io/${{ github.repository }}:${{ inputs.image_tag == 'latest' && github.sha || inputs.image_tag }}
 
@@ -30,9 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: aws
     steps:
-      # SEM 'ref' — o checkout usa o SHA do evento por padrão.
-      # O 'ref: image_tag' estava causando o erro, porque 'latest'
-      # não é uma branch/tag do Git.
+      # Sem 'ref' — o checkout usa o SHA do evento por padrão.
+      # Passar 'ref: image_tag' quebrava com 'latest' (não é branch/tag do Git).
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -89,13 +87,14 @@ jobs:
             k8s/rolling/*.yaml \
             ec2-user@${{ vars.EC2_PUBLIC_IP }}:/home/ec2-user/rolling/
 
+      # Caminho absoluto do kubectl: o SSH não-interativo não carrega
+      # /etc/profile.d/, então 'kubectl' puro dá 'command not found'.
       - name: Aplicar e aguardar rollout
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ec2-user@${{ vars.EC2_PUBLIC_IP }} \
-            'export PATH=$PATH:/usr/local/bin; \
-             kubectl apply -f /home/ec2-user/rolling/; \
-             kubectl -n rolling rollout status deploy/todolist --timeout=180s'
+            '/usr/local/bin/kubectl apply -f /home/ec2-user/rolling/ && \
+             /usr/local/bin/kubectl -n rolling rollout status deploy/todolist --timeout=180s'
 
       - name: Smoke test
         run: |
