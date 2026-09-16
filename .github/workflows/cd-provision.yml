@@ -1,0 +1,138 @@
+# Provisiona a infraestrutura: Terraform cria VPC/SG/EC2 na AWS,
+# Ansible instala kind + ingress-nginx + namespaces na EC2.
+# Roda uma vez por sessão (o IP muda ao reiniciar a instância no Learner Lab).
+name: CD - Provision Infra
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+# Token do GITHUB_TOKEN com permissão mínima: só leitura do repo.
+permissions:
+  contents: read
+
+# Evita duas execuções simultâneas de provisionamento.
+concurrency:
+  group: provision-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    name: Provision EC2 + kind + ingress-nginx
+    runs-on: ubuntu-latest
+    environment: aws
+    outputs:
+      public_ip: ${{ steps.tf.outputs.public_ip }}
+      instance_id: ${{ steps.tf.outputs.instance_id }}
+      app_url: ${{ steps.tf.outputs.app_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Autenticação AWS — usa os secrets do Environment "aws".
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region:            ${{ vars.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.7.5
+
+      # Gera o par de chaves no próprio runner. A pública vai para a AWS,
+      # a privada é publicada como artifact para o aluno cadastrar no secret.
+      - name: Gerar par de chaves SSH
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keygen -t ed25519 -N "" -f ~/.ssh/deploy_key -C "github-actions"
+          chmod 600 ~/.ssh/deploy_key
+          echo "Chave gerada"
+
+      # Registra a pública na AWS como Key Pair (recria se já existir).
+      - name: Importar chave pública na AWS
+        run: |
+          aws ec2 delete-key-pair --key-name ci-cd-deploy-key 2>/dev/null || true
+          aws ec2 import-key-pair \
+            --key-name ci-cd-deploy-key \
+            --public-key-material fileb://$HOME/.ssh/deploy_key.pub
+
+      # Inicializa o diretório do Terraform (baixa providers).
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init -input=false
+
+      # Aplica a infra. Variáveis passam via TF_VAR_* (não vazam em ps/logs).
+      - name: Terraform apply
+        id: tf
+        working-directory: terraform
+        env:
+          TF_VAR_aws_region:    ${{ vars.AWS_REGION }}
+          TF_VAR_instance_type: ${{ vars.TF_INSTANCE_TYPE }}
+          TF_VAR_key_name:      ci-cd-deploy-key
+        run: |
+          terraform apply -auto-approve -input=false
+          echo "public_ip=$(terraform output -raw instance_public_ip)" >> $GITHUB_OUTPUT
+          echo "instance_id=$(terraform output -raw instance_id)"       >> $GITHUB_OUTPUT
+          echo "app_url=$(terraform output -raw application_url)"       >> $GITHUB_OUTPUT
+
+      - name: Instalar Ansible
+        run: pip install "ansible-core>=2.15"
+
+      # Aguarda o SSH da EC2 — o user_data leva ~1 min para terminar.
+      - name: Aguardar SSH da EC2
+        run: |
+          for i in $(seq 1 40); do
+            if ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+                 -o ConnectTimeout=5 \
+                 ec2-user@${{ steps.tf.outputs.public_ip }} true 2>/dev/null; then
+              echo "SSH ok"
+              exit 0
+            fi
+            echo "aguardando... ($i/40)"
+            sleep 10
+          done
+          echo "Timeout aguardando SSH" >&2
+          exit 1
+
+      # Ansible configura a EC2: kind + ingress-nginx + namespaces.
+      - name: Ansible provision
+        working-directory: ansible
+        env:
+          EC2_IP: ${{ steps.tf.outputs.public_ip }}
+        run: |
+          chmod +x inventory.sh
+          ansible-playbook playbook.yml
+
+      # Publica a chave privada como artifact temporário (1 dia)
+      # para o aluno baixar e cadastrar como secret EC2_SSH_KEY.
+      - name: Upload chave SSH como artifact
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: ec2-ssh-key
+          path: ~/.ssh/deploy_key
+          retention-days: 1
+
+      # Summary com os próximos passos manuais (uma vez por sessão).
+      - name: Resumo
+        run: |
+          {
+            echo "### Infra provisionada"
+            echo ""
+            echo "| Item | Valor |"
+            echo "|---|---|"
+            echo "| IP público | \`${{ steps.tf.outputs.public_ip }}\` |"
+            echo "| Instance ID | \`${{ steps.tf.outputs.instance_id }}\` |"
+            echo "| URL | ${{ steps.tf.outputs.app_url }} |"
+            echo ""
+            echo "### Próximos passos (uma vez por sessão)"
+            echo "1. Baixe o artifact \`ec2-ssh-key\`"
+            echo "2. Cadastre em Environment \`aws\` como secret \`EC2_SSH_KEY\`"
+            echo "3. Atualize a variable \`EC2_PUBLIC_IP\` com o IP acima"
+          } >> $GITHUB_STEP_SUMMARY
