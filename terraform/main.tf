@@ -96,6 +96,8 @@ resource "aws_security_group" "web" {
 }
 
 # EC2 — roda o user_data.sh no boot. O Ansible configura o resto depois.
+# volume_size = 30: a AMI mais recente do AL2023 tem snapshot raiz de 30 GB.
+# Se reduzir, o RunInstances falha com "smaller than snapshot".
 resource "aws_instance" "web" {
   ami                    = data.aws_ami.al2023.id
   instance_type          = var.instance_type
@@ -105,7 +107,7 @@ resource "aws_instance" "web" {
   user_data              = file("${path.module}/user_data.sh")
 
   root_block_device {
-    volume_size = 20
+    volume_size = 30
     volume_type = "gp3"
   }
 
