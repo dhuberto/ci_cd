@@ -1,14 +1,25 @@
 ---
-# Configura a EC2 para receber deploys.
-# Ordem: Docker (com fallback) → kind → kubectl → cluster kind →
-# ingress-nginx → namespaces rolling e blue-green.
+# =============================================================================
+# playbook.yml — configura a EC2 para receber deploys
+# =============================================================================
+# Usa hosts: all porque o inventário é passado inline pelo workflow
+# (`ansible-playbook -i "${EC2_IP}," playbook.yml`), que cria apenas o grupo
+# implícito "all" com o host único. O grupo "ec2" só existiria se usássemos
+# o inventory.sh — que foi removido por não funcionar no GitHub Actions.
 #
-# Uso de `command` com caminho absoluto em vez de `shell`: o SSH não-interativo
-# não carrega /etc/profile.d/, então /usr/local/bin pode não estar no PATH.
-#
-# kubectl com versão fixa: evita HTTP discovery (uri) que pode falhar no meio.
+# Ordem das tarefas:
+#   1. Docker (fallback se user_data falhou)
+#   2. ec2-user no grupo docker
+#   3. Instalar kind em /usr/local/bin
+#   4. Instalar kubectl em /usr/local/bin (versão fixa)
+#   5. Criar kind-config.yaml
+#   6. Criar cluster kind (idempotente)
+#   7. Aplicar ingress-nginx
+#   8. Criar namespaces rolling e blue-green
+# =============================================================================
+
 - name: Configurar EC2 para o lab de CD
-  hosts: ec2
+  hosts: all
   gather_facts: true
   become: false
 
@@ -18,7 +29,9 @@
     kubectl_version: "v1.31.0"
 
   tasks:
-    # Verifica se docker existe; se não, instala com --allowerasing.
+    # =========================================================================
+    # 1) Docker — verifica e instala se necessário
+    # =========================================================================
     - name: Verificar se docker existe
       command: docker --version
       register: docker_check
@@ -33,7 +46,6 @@
         allowerasing: true
       when: docker_check.rc != 0
 
-    # Garante que o serviço está habilitado e rodando.
     - name: Garantir docker habilitado e rodando
       become: true
       systemd:
@@ -41,7 +53,6 @@
         enabled: true
         state: started
 
-    # Garante que o ec2-user pode usar docker sem sudo.
     - name: Garantir que o ec2-user está no grupo docker
       become: true
       user:
@@ -49,7 +60,9 @@
         groups: docker
         append: true
 
-    # ---- kind ----
+    # =========================================================================
+    # 2) kind — instala em /usr/local/bin
+    # =========================================================================
     - name: Instalar kind em /usr/local/bin
       become: true
       get_url:
@@ -68,7 +81,9 @@
         msg: "kind não foi instalado em /usr/local/bin/kind"
       when: not kind_bin.stat.exists
 
-    # ---- kubectl ----
+    # =========================================================================
+    # 3) kubectl — versão fixa, caminho absoluto
+    # =========================================================================
     - name: Instalar kubectl em /usr/local/bin
       become: true
       get_url:
@@ -96,9 +111,9 @@
       debug:
         msg: "{{ kubectl_check.stdout_lines }}"
 
-    # ---- kind-config.yaml ----
-    # Expõe as portas 80/443 do nó para que o ingress-nginx responda
-    # diretamente no IP da EC2.
+    # =========================================================================
+    # 4) kind-config.yaml — expõe as portas 80/443 do nó para o ingress
+    # =========================================================================
     - name: Criar kind-config.yaml
       copy:
         dest: /home/ec2-user/kind-config.yaml
@@ -123,7 +138,9 @@
                 - { containerPort: 80,  hostPort: 80,  protocol: TCP }
                 - { containerPort: 443, hostPort: 443, protocol: TCP }
 
-    # ---- cluster kind (idempotente) ----
+    # =========================================================================
+    # 5) Cluster kind — idempotente
+    # =========================================================================
     - name: Verificar se o cluster kind já existe
       command: /usr/local/bin/kind get clusters
       register: kind_clusters
@@ -141,7 +158,9 @@
       command: /usr/local/bin/kubectl wait --for=condition=Ready node --all --timeout=180s
       changed_when: false
 
-    # ---- ingress-nginx ----
+    # =========================================================================
+    # 6) ingress-nginx — expõe o Ingress na porta 80 do nó
+    # =========================================================================
     - name: Aplicar manifest do ingress-nginx (kind)
       command: >
         /usr/local/bin/kubectl apply -f
@@ -155,7 +174,9 @@
         --timeout=240s
       changed_when: false
 
-    # ---- namespaces ----
+    # =========================================================================
+    # 7) Namespaces — rolling e blue-green
+    # =========================================================================
     - name: Criar namespaces do lab
       command: /usr/local/bin/kubectl create ns {{ item }}
       register: ns_create
@@ -167,7 +188,9 @@
         - rolling
         - blue-green
 
-    # Log final — aparece no Actions.
+    # =========================================================================
+    # 8) Log final — ajuda a debugar no log do Actions
+    # =========================================================================
     - name: Mostrar nodes
       command: /usr/local/bin/kubectl get nodes -o wide
       register: nodes_out
