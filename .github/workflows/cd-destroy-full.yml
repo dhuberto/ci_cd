@@ -2,11 +2,6 @@
 # CD - Destroy Full
 # =============================================================================
 # Destroi TUDO: infra, Key Pair, artifact do state, EC2 órfãs e SGs órfãos.
-# Uso: fim do curso / entrega, para deixar a conta AWS limpa.
-#
-# Depois deste workflow, a próxima execução do cd-provision vai gerar
-# um novo par de chaves SSH — o secret EC2_SSH_KEY precisa ser recadastrado.
-#
 # Uso: Actions → CD - Destroy Full → Run workflow → confirm: DESTROY-ALL
 # =============================================================================
 name: CD - Destroy Full
@@ -19,7 +14,6 @@ on:
         required: true
         default: ''
 
-# Token mínimo: só leitura do repositório.
 permissions:
   contents: read
 
@@ -33,14 +27,12 @@ jobs:
     runs-on: ubuntu-latest
     environment: aws
 
-    # Guard mais rígido: exige DESTROY-ALL.
     if: ${{ github.event.inputs.confirm == 'DESTROY-ALL' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      # Autenticação AWS via secrets do Environment aws.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
@@ -54,7 +46,6 @@ jobs:
         with:
           terraform_version: 1.7.5
 
-      # Baixa o state salvo pelo cd-provision.
       - name: Baixar state do Terraform
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
@@ -79,7 +70,6 @@ jobs:
         working-directory: terraform
         run: terraform init -input=false
 
-      # 1) Destroy da infraestrutura gerenciada pelo Terraform.
       - name: Terraform destroy
         if: steps.check.outputs.found == 'true'
         working-directory: terraform
@@ -89,19 +79,7 @@ jobs:
           TF_VAR_key_name:      ci-cd-deploy-key
         run: terraform destroy -auto-approve -input=false
 
-      # 2) Remove o Key Pair da AWS.
-      - name: Remover Key Pair da AWS
-        run: |
-          if aws ec2 describe-key-pairs --key-name ci-cd-deploy-key 2>/dev/null; then
-            aws ec2 delete-key-pair --key-name ci-cd-deploy-key
-            echo "Key Pair ci-cd-deploy-key removido."
-          else
-            echo "Key Pair já não existia."
-          fi
-
-      # 3) Remove EC2 órfãs com a tag do projeto.
-      #    Cobre o caso de execuções antigas do provision terem criado
-      #    EC2 sem que o state atual saiba.
+      # Limpeza extra 1: EC2 órfãs com a tag do projeto.
       - name: Remover EC2 órfãs com a tag do projeto
         run: |
           set -e
@@ -118,7 +96,17 @@ jobs:
             echo "Nenhuma EC2 órfã encontrada."
           fi
 
-      # 4) Remove Security Groups órfãos com o nome do projeto.
+      # Limpeza extra 2: Key Pair.
+      - name: Remover Key Pair da AWS
+        run: |
+          if aws ec2 describe-key-pairs --key-name ci-cd-deploy-key 2>/dev/null; then
+            aws ec2 delete-key-pair --key-name ci-cd-deploy-key
+            echo "Key Pair ci-cd-deploy-key removido."
+          else
+            echo "Key Pair já não existia."
+          fi
+
+      # Limpeza extra 3: Security Groups órfãos com o nome do projeto.
       - name: Remover Security Groups órfãos
         run: |
           set -e
@@ -136,7 +124,53 @@ jobs:
             done
           fi
 
-      # 5) Limpa o artifact do state para o próximo provision começar limpo.
+      # Limpeza extra 4: VPCs órfãs com a tag do projeto.
+      # Dependências (subnet, IGW, route table, SG) são removidas em cascata
+      # pelo próprio comando `delete-vpc` da AWS.
+      - name: Remover VPCs órfãs do projeto
+        run: |
+          set -e
+          VPCS=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Name,Values=ci-cd-app-vpc" \
+            --query 'Vpcs[].VpcId' \
+            --output text 2>/dev/null || true)
+          if [ -z "$VPCS" ] || [ "$VPCS" = "None" ]; then
+            echo "Nenhuma VPC órfã encontrada."
+          else
+            for VPC in $VPCS; do
+              echo "Removendo VPC $VPC (com subnet, IGW, route table, SG em cascata)..."
+              # Desanexa e remove IGW antes (AWS exige isso).
+              IGW=$(aws ec2 describe-internet-gateways \
+                --filters "Name=attachment.vpc-id,Values=$VPC" \
+                --query 'InternetGateways[].InternetGatewayId' \
+                --output text 2>/dev/null || true)
+              if [ -n "$IGW" ] && [ "$IGW" != "None" ]; then
+                for G in $IGW; do
+                  aws ec2 detach-internet-gateway --internet-gateway-id $G --vpc-id $VPC || true
+                  aws ec2 delete-internet-gateway --internet-gateway-id $G || true
+                done
+              fi
+              # Remove subnets (a AWS exige antes de deletar a VPC).
+              SUBNETS=$(aws ec2 describe-subnets \
+                --filters "Name=vpc-id,Values=$VPC" \
+                --query 'Subnets[].SubnetId' --output text 2>/dev/null || true)
+              for S in $SUBNETS; do
+                [ "$S" = "None" ] || aws ec2 delete-subnet --subnet-id $S || true
+              done
+              # Remove route tables não-principais.
+              RTS=$(aws ec2 describe-route-tables \
+                --filters "Name=vpc-id,Values=$VPC" \
+                --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' \
+                --output text 2>/dev/null || true)
+              for R in $RTS; do
+                [ "$R" = "None" ] || aws ec2 delete-route-table --route-table-id $R || true
+              done
+              # Agora remove a VPC.
+              aws ec2 delete-vpc --vpc-id $VPC || echo "Não deu para remover $VPC"
+            done
+          fi
+
+      # Limpeza final: artifact do state.
       - name: Remover artifact do state
         uses: geekyeggo/delete-artifact@f275313e70c08f6120db482d7c247f020fe431e0 # v5.0.0
         with:
@@ -153,13 +187,7 @@ jobs:
             echo "| VPC / subnet / IGW / SG / EC2 | destruídos |"
             echo "| EC2 órfãs | verificadas e removidas |"
             echo "| SG órfãos | verificados e removidos |"
-            echo "| Key Pair \`ci-cd-deploy-key\` | **removido** |"
-            echo "| Artifact \`terraform-state\` | **removido** |"
-            echo "| Secrets / Variables | mantidos |"
-            echo ""
-            echo "### Próximos passos (uma vez)"
-            echo "1. Rode **CD - Provision Infra** — vai gerar um novo par de chaves SSH"
-            echo "2. Baixe o novo artifact \`ec2-ssh-key\`"
-            echo "3. Sobrescreva o secret \`EC2_SSH_KEY\`"
-            echo "4. Atualize a variable \`EC2_PUBLIC_IP\` com o novo IP"
+            echo "| VPCs órfãs | verificadas e removidas |"
+            echo "| Key Pair | removido |"
+            echo "| Artifact do state | removido |"
           } >> $GITHUB_STEP_SUMMARY
