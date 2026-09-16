@@ -39,51 +39,43 @@ Settings > Branches		Regra para main com: Require PR + 1 approval
 # Estrutura:
 ```
 ci_cd/
-├── .github/
-│   ├── CODEOWNERS                                # Define quem revisa PRs em quais arquivos
-│   └── workflows/
-│       ├── ci.yml                                # Pipeline de CI: roda em PR/push com pytest, pip-audit, matrix e Trivy
-│       ├── _reusable-test.yml                    # Workflow reutilizável (workflow_call) com os steps de teste
-│       ├── cd-provision.yml                      # Provisiona AWS via Terraform e configura kind+ingress na EC2 via Ansible
-│       ├── cd-rolling.yml                        # Build+push da imagem e deploy Rolling Update no namespace rolling
-│       ├── cd-blue-green.yml                     # Build+push e deploy no slot blue ou green (cor inativa)
-│       └── cd-blue-green-switch.yml              # Faz o cutover: patch do Service active (switch e rollback)
+├── .github/workflows/
+│   ├── ci.yml                          # CI: pytest, pip-audit, matrix (Ativ. 1)
+│   ├── _reusable-test.yml              # Workflow reutilizável (workflow_call)
+│   ├── cd-provision.yml                # Provisiona AWS via Terraform + Ansible
+│   ├── cd-rolling.yml                  # Build+push + Rolling deploy
+│   ├── cd-blue-green.yml               # Build+push + deploy por cor
+│   ├── cd-blue-green-switch.yml        # Switch de tráfego (e rollback)
+│   ├── cd-destroy.yml                  # Teardown parcial (mantém Key Pair)
+│   └── cd-destroy-full.yml             # Teardown total
 │
 ├── terraform/
-│   ├── providers.tf                              # Declara provider AWS e versão do Terraform (state local no runner)
-│   ├── variables.tf                              # Variáveis do Terraform: região, tipo da instância, key_name, CIDR
-│   ├── main.tf                                   # Recursos AWS: VPC, subnet, IGW, route table, SG e EC2
-│   ├── outputs.tf                                # Outputs consumidos pelo workflow: IP público, ID, URL
-│   └── user_data.sh                              # Script de bootstrap da EC2: instala Docker e adiciona ec2-user ao grupo
+│   ├── providers.tf                    # Provider AWS, versão do Terraform
+│   ├── variables.tf                    # Região, tipo, key_name, CIDR, disco
+│   ├── main.tf                         # VPC, subnet, IGW, SG, EC2
+│   ├── outputs.tf                      # IP, ID, URL
+│   └── user_data.sh                    # Bootstrap da EC2 (Docker)
 │
 ├── ansible/
-│   ├── ansible.cfg                               # Configuração do Ansible: inventory, usuário, chave SSH
-│   ├── inventory.sh                              # Gera o inventory dinâmico a partir da variável EC2_IP
-│   └── playbook.yml                              # Instala kind, kubectl, cria cluster e ingress-nginx, cria namespaces
+│   ├── ansible.cfg                     # Configuração global do Ansible
+│   └── playbook.yml                    # kind, kubectl, ingress, namespaces
 │
 ├── k8s/
 │   ├── rolling/
-│   │   ├── deployment.yaml                       # Deployment do Rolling Update (3 réplicas, strategy RollingUpdate)
-│   │   ├── service.yaml                          # Service ClusterIP interno do namespace rolling
-│   │   └── ingress.yaml                          # Ingress que expõe rolling.local → Service todolist
+│   │   ├── deployment.yaml             # 3 réplicas, APP_COLOR=purple
+│   │   ├── service.yaml                # ClusterIP
+│   │   └── ingress.yaml                # rolling.local
 │   └── blue-green/
-│       ├── deployment-blue.yaml                  # Deployment do slot blue (APP_COLOR=blue, labels slot=blue)
-│       ├── deployment-green.yaml                 # Deployment do slot green (APP_COLOR=green, labels slot=green)
-│       ├── service-blue.yaml                     # Service ClusterIP do slot blue (usado pelo smoke test)
-│       ├── service-green.yaml                    # Service ClusterIP do slot green (usado pelo smoke test)
-│       ├── service-active.yaml                   # Service ativo — o switch de tráfego só troca o selector dele
-│       └── ingress.yaml                          # Ingress aponta sempre para todolist-active em todolist.local
+│       ├── deployment-blue.yaml        # APP_COLOR=blue
+│       ├── deployment-green.yaml       # APP_COLOR=green
+│       ├── service-blue.yaml           # ClusterIP do slot blue
+│       ├── service-green.yaml          # ClusterIP do slot green
+│       ├── service-active.yaml         # Service ativo (selector trocável)
+│       └── ingress.yaml                # todolist.local → todolist-active
 │
-├── docs/
-│   ├── ci-pipeline.md                            # Documentação do pipeline de CI (gates, matrix, reusable)
-│   └── cd-pipeline.md                            # Documentação do pipeline de CD (arquitetura, deploy, rollback)
-│
-├── Dockerfile                                    # Build da imagem da aplicação Flask usada nos deploys
-├── app.py                                        # Aplicação Flask com rotas / e /healthz usadas pelos gates
-├── requirements.txt                              # Dependências de produção (alvo do pip-audit e Trivy)
-├── requirements-dev.txt                          # Dependências de desenvolvimento (pytest, ruff, pip-audit)
-├── test_app.py                                   # Testes unitários da aplicação
-└── README.md                                     # Documentação do grupo: arquitetura, comandos, rollback
+└── docs/
+    ├── ci-pipeline.md                  # Documentação do CI
+    └── cd-pipeline.md                  # Documentação do CD
 ```
 # CI/CD - Grupo dhuberto
 
