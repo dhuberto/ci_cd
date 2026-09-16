@@ -2,24 +2,12 @@
 # =============================================================================
 # playbook.yml — configura a EC2 para receber deploys
 # =============================================================================
-# Usa hosts: all porque o inventário é passado inline pelo workflow
-# (`ansible-playbook -i "${EC2_IP}," playbook.yml`).
-#
+# Usa hosts: all porque o inventário é passado inline pelo workflow.
 # Tasks que usam docker/kubectl rodam como root (become: true) porque o
-# ec2-user acabou de ser adicionado ao grupo docker — o grupo só passa a
-# valer em novas sessões SSH, e o Ansible reusa a mesma conexão durante
-# todo o playbook. Root não depende de grupo nenhum.
-#
-# Ordem:
-#   1. dnf clean all
-#   2. Docker habilitado e rodando
-#   3. ec2-user no grupo docker
-#   4. kind
-#   5. kubectl
-#   6. kind-config.yaml
-#   7. cluster kind
-#   8. ingress-nginx
-#   9. namespaces
+# ec2-user acabou de ser adicionado ao grupo docker e o grupo só passa a
+# valer em novas sessões SSH. Root não depende de grupo nenhum.
+# No fim, o kubeconfig do root é copiado para o ec2-user, para os
+# workflows de deploy (que rodam como ec2-user) conseguirem usar kubectl.
 # =============================================================================
 
 - name: Configurar EC2 para o lab de CD
@@ -111,7 +99,7 @@
         msg: "{{ kubectl_check.stdout_lines }}"
 
     # =========================================================================
-    # 5) kind-config.yaml — arquivo na home do ec2-user
+    # 5) kind-config.yaml
     # =========================================================================
     - name: Criar kind-config.yaml
       copy:
@@ -138,7 +126,7 @@
                 - { containerPort: 443, hostPort: 443, protocol: TCP }
 
     # =========================================================================
-    # 6) Cluster kind — roda como root (não depende do grupo docker)
+    # 6) Cluster kind — como root
     # =========================================================================
     - name: Verificar se o cluster kind já existe
       become: true
@@ -194,7 +182,31 @@
         - blue-green
 
     # =========================================================================
-    # 9) Log final
+    # 9) Copiar kubeconfig para o ec2-user
+    # =========================================================================
+    # O kind criou o kubeconfig em /root/.kube/config (become: true).
+    # Os workflows de deploy rodam como ec2-user via SSH — precisam ver.
+    - name: Criar diretório .kube do ec2-user
+      become: true
+      file:
+        path: /home/ec2-user/.kube
+        state: directory
+        owner: ec2-user
+        group: ec2-user
+        mode: "0700"
+
+    - name: Copiar kubeconfig do root para o ec2-user
+      become: true
+      copy:
+        src: /root/.kube/config
+        dest: /home/ec2-user/.kube/config
+        remote_src: true
+        owner: ec2-user
+        group: ec2-user
+        mode: "0600"
+
+    # =========================================================================
+    # 10) Log final
     # =========================================================================
     - name: Mostrar nodes
       become: true
