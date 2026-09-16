@@ -1,4 +1,18 @@
-# Data source: AMI mais recente do Amazon Linux 2023 (x86_64).
+# =============================================================================
+# main.tf — recursos AWS (VPC, subnet, IGW, SG, EC2)
+# =============================================================================
+# Topologia:
+#   VPC 10.0.0.0/16
+#     └─ Subnet pública 10.0.1.0/24 (AZ-a)
+#          └─ Security Group (22, 80, 6443)
+#               └─ EC2 Amazon Linux 2023 (t3.medium)
+#
+# O user_data.sh instala Docker. kind/kubectl/ingress-nginx são instalados
+# depois pelo Ansible (ansible/playbook.yml).
+# =============================================================================
+
+# AMI: pega a Amazon Linux 2023 x86_64 mais recente.
+# O data source expõe root_device_size, usado para dimensionar o disco.
 data "aws_ami" "al2023" {
   most_recent = true
   owners      = ["amazon"]
@@ -96,8 +110,12 @@ resource "aws_security_group" "web" {
 }
 
 # EC2 — roda o user_data.sh no boot. O Ansible configura o resto depois.
-# volume_size = 30: a AMI mais recente do AL2023 tem snapshot raiz de 30 GB.
-# Se reduzir, o RunInstances falha com "smaller than snapshot".
+#
+# volume_size = root_device_size da AMI:
+#   A AMI do AL2023 muda de tamanho ao longo do tempo (a AWS publica novas
+#   versões do snapshot raiz). Hardcodar 20 quebra quando a AWS publica uma
+#   AMI com snapshot maior. Ler do data source evita essa quebra.
+#   max() garante que nunca fica abaixo do snapshot, mesmo se a AMI encolher.
 resource "aws_instance" "web" {
   ami                    = data.aws_ami.al2023.id
   instance_type          = var.instance_type
@@ -107,7 +125,7 @@ resource "aws_instance" "web" {
   user_data              = file("${path.module}/user_data.sh")
 
   root_block_device {
-    volume_size = 30
+    volume_size = max(30, data.aws_ami.al2023.root_device_size)
     volume_type = "gp3"
   }
 
