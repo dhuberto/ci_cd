@@ -1,4 +1,4 @@
-# Data source: pega a AMI mais recente do Amazon Linux 2023 (x86_64).
+# Data source: AMI mais recente do Amazon Linux 2023 (x86_64).
 data "aws_ami" "al2023" {
   most_recent = true
   owners      = ["amazon"]
@@ -55,7 +55,7 @@ resource "aws_route_table_association" "public" {
 # Security Group com 3 portas:
 #   22   → SSH (GitHub Actions entra para instalar/configurar)
 #   80   → HTTP (ingress-nginx expõe a app)
-#   6443 → API do k8s (para OpenLens/Freelens, opcional)
+#   6443 → API do k8s (OpenLens/Freelens, opcional)
 resource "aws_security_group" "web" {
   name        = "${var.project_name}-sg"
   description = "SG para kind + ingress-nginx"
@@ -95,9 +95,7 @@ resource "aws_security_group" "web" {
   tags = { Name = "${var.project_name}-sg" }
 }
 
-# A EC2 em si. O user_data instala o Docker base;
-# kind, kubectl e ingress-nginx são instalados depois pelo Ansible.
-# Volume raiz de 20 GB — o cluster kind + imagens precisam de espaço.
+# EC2 — roda o user_data.sh no boot. O Ansible configura o resto depois.
 resource "aws_instance" "web" {
   ami                    = data.aws_ami.al2023.id
   instance_type          = var.instance_type
