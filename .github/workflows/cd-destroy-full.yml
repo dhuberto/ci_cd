@@ -1,7 +1,9 @@
 # =============================================================================
 # CD - Destroy Full
 # =============================================================================
-# Destroi TUDO: infra, Key Pair, artifact do state, EC2 órfãs e SGs órfãos.
+# Destroi TUDO: infra, Key Pair, artifact do state, EC2 órfãs, SGs órfãos
+# e VPCs órfãs.
+#
 # Uso: Actions → CD - Destroy Full → Run workflow → confirm: DESTROY-ALL
 # =============================================================================
 name: CD - Destroy Full
@@ -70,13 +72,15 @@ jobs:
         working-directory: terraform
         run: terraform init -input=false
 
+      # TF_VAR_root_volume_size obrigatório por causa da validation no variables.tf.
       - name: Terraform destroy
         if: steps.check.outputs.found == 'true'
         working-directory: terraform
         env:
-          TF_VAR_aws_region:    ${{ vars.AWS_REGION }}
-          TF_VAR_instance_type: ${{ vars.TF_INSTANCE_TYPE }}
-          TF_VAR_key_name:      ci-cd-deploy-key
+          TF_VAR_aws_region:        ${{ vars.AWS_REGION }}
+          TF_VAR_instance_type:     ${{ vars.TF_INSTANCE_TYPE }}
+          TF_VAR_key_name:          ci-cd-deploy-key
+          TF_VAR_root_volume_size:  30
         run: terraform destroy -auto-approve -input=false
 
       # Limpeza extra 1: EC2 órfãs com a tag do projeto.
@@ -106,7 +110,7 @@ jobs:
             echo "Key Pair já não existia."
           fi
 
-      # Limpeza extra 3: Security Groups órfãos com o nome do projeto.
+      # Limpeza extra 3: Security Groups órfãos.
       - name: Remover Security Groups órfãos
         run: |
           set -e
@@ -125,8 +129,6 @@ jobs:
           fi
 
       # Limpeza extra 4: VPCs órfãs com a tag do projeto.
-      # Dependências (subnet, IGW, route table, SG) são removidas em cascata
-      # pelo próprio comando `delete-vpc` da AWS.
       - name: Remover VPCs órfãs do projeto
         run: |
           set -e
@@ -139,7 +141,6 @@ jobs:
           else
             for VPC in $VPCS; do
               echo "Removendo VPC $VPC (com subnet, IGW, route table, SG em cascata)..."
-              # Desanexa e remove IGW antes (AWS exige isso).
               IGW=$(aws ec2 describe-internet-gateways \
                 --filters "Name=attachment.vpc-id,Values=$VPC" \
                 --query 'InternetGateways[].InternetGatewayId' \
@@ -150,14 +151,12 @@ jobs:
                   aws ec2 delete-internet-gateway --internet-gateway-id $G || true
                 done
               fi
-              # Remove subnets (a AWS exige antes de deletar a VPC).
               SUBNETS=$(aws ec2 describe-subnets \
                 --filters "Name=vpc-id,Values=$VPC" \
                 --query 'Subnets[].SubnetId' --output text 2>/dev/null || true)
               for S in $SUBNETS; do
                 [ "$S" = "None" ] || aws ec2 delete-subnet --subnet-id $S || true
               done
-              # Remove route tables não-principais.
               RTS=$(aws ec2 describe-route-tables \
                 --filters "Name=vpc-id,Values=$VPC" \
                 --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' \
@@ -165,7 +164,6 @@ jobs:
               for R in $RTS; do
                 [ "$R" = "None" ] || aws ec2 delete-route-table --route-table-id $R || true
               done
-              # Agora remove a VPC.
               aws ec2 delete-vpc --vpc-id $VPC || echo "Não deu para remover $VPC"
             done
           fi
