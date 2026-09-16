@@ -1,0 +1,16 @@
+# Service do slot blue — usado apenas pelo smoke test direto no pod,
+# para validar a cor ANTES de fazer o switch de tráfego.
+apiVersion: v1
+kind: Service
+metadata:
+  name: todolist-blue
+  namespace: blue-green
+spec:
+  type: ClusterIP
+  selector:
+    app: todolist
+    slot: blue
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000
