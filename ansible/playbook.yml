@@ -4,15 +4,14 @@
 # =============================================================================
 # Usa hosts: all porque o inventário é passado inline pelo workflow.
 #
-# Cache do DNF:
-#   O user_data.sh pode deixar o cache do DNF em estado inconsistente
-#   (metadados apontando para arquivos .rpm que não existem no disco).
-#   `dnf clean all` NÃO resolve isso — o diretório /var/cache/dnf/ inteiro
-#   precisa ser removido para o DNF recriá-lo do zero.
+# Limpeza do cache do DNF:
+#   Usa `dnf clean all` + `rm -rf /var/cache/dnf/*` + `dnf makecache`.
+#   NÃO remover o diretório /var/cache/dnf inteiro — o DNF gerencia
+#   arquivos internos (metadata_lock.pid etc.) e recriar o diretório do
+#   zero quebra a expectativa do DNF.
 #
 # Docker:
-#   Verifica `which docker`. Se não existe, limpa o cache, instala com
-#   --allowerasing, e só depois habilita o serviço via systemd.
+#   Verifica `which docker`. Se não existe, instala com --allowerasing.
 #
 # kind/kubectl/namespaces rodam como root (become: true) para evitar
 # permission denied no docker.sock.
@@ -30,25 +29,22 @@
 
   tasks:
     # =========================================================================
-    # 1) Remover diretório de cache do DNF
+    # 1) Limpeza do cache do DNF — 3 passos na ordem correta
     # =========================================================================
-    # Não usar `dnf clean all`: ele não remove arquivos órfãos que o DNF
-    # deixou em /var/cache/dnf após uma interrupção. Remover o diretório
-    # inteiro força o DNF a recriar tudo na próxima operação.
-    - name: Remover diretório de cache do DNF
+    - name: dnf clean all (remove metadados e pacotes baixados)
       become: true
-      file:
-        path: /var/cache/dnf
-        state: absent
+      command: dnf clean all
+      changed_when: false
 
-    - name: Recriar diretório de cache do DNF vazio
+    - name: Remover resíduos físicos em /var/cache/dnf
       become: true
-      file:
-        path: /var/cache/dnf
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
+      shell: rm -rf /var/cache/dnf/*
+      changed_when: false
+
+    - name: Reconstruir cache do DNF
+      become: true
+      command: dnf makecache
+      changed_when: false
 
     # =========================================================================
     # 2) Docker — verifica o binário, instala se necessário
