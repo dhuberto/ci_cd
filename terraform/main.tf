@@ -11,16 +11,26 @@
 # depois pelo Ansible (ansible/playbook.yml).
 # =============================================================================
 
-# AMI: pega a Amazon Linux 2023 x86_64 mais recente.
-# O tamanho do disco raiz vem de var.root_volume_size (não do data source,
-# que NÃO expõe root_device_size).
+# AMI: pega a Amazon Linux 2023 PADRÃO (x86_64), excluindo variantes
+# ECS Optimized, EKS Optimized e Minimal.
+# O padrão "2023.*" no nome garante que só a AMI normal seja escolhida.
 data "aws_ami" "al2023" {
   most_recent = true
   owners      = ["amazon"]
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    values = ["al2023-ami-2023.*-x86_64"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
   }
 }
 
