@@ -1,18 +1,22 @@
 #!/bin/bash
-# Bootstrap da EC2: instala Docker e adiciona ec2-user ao grupo docker.
-# NÃO roda `dnf update` porque gera conflito curl vs curl-minimal no AL2023.
-# kind/kubectl/ingress ficam por conta do Ansible.
+# =============================================================================
+# user_data.sh — bootstrap da EC2
+# =============================================================================
+# A EC2 sobe apenas com os pacotes auxiliares (git, curl) já presentes na AMI.
+# Docker, kind e kubectl ficam por conta do Ansible (ansible/playbook.yml).
+#
+# Por que não instalar Docker aqui:
+#   O AL2023 tem conflito entre curl-minimal e curl, e o `dnf install docker`
+#   pode falhar deixando o cache do DNF corrompido. O Ansible lida com isso
+#   removendo /var/cache/dnf e reinstalando com --allowerasing.
+# =============================================================================
+
 set -euxo pipefail
 
-# Instala Docker. --allowerasing permite resolver o conflito curl/curl-minimal.
-dnf install -y --allowerasing docker git curl
+# Garante que o ec2-user tem o grupo docker (o serviço em si é instalado depois).
+# Nada é instalado aqui — só configuração de grupo.
+usermod -aG docker ec2-user 2>/dev/null || true
 
-# Habilita e inicia o Docker.
-systemctl enable --now docker
-
-# Adiciona o ec2-user ao grupo docker (evita sudo em cada comando).
-usermod -aG docker ec2-user
-
-# Marcador para debug: confirma que o user_data terminou com sucesso.
+# Marcador para debug: confirma que o user_data terminou.
 echo "user_data OK em $(date)" > /home/ec2-user/user_data.done
 chown ec2-user:ec2-user /home/ec2-user/user_data.done
