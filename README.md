@@ -351,52 +351,52 @@ Acesse `http://localhost:8080/`.
 ```
 ci_cd/
 ├── .github/
-│   ├── CODEOWNERS
+│   ├── CODEOWNERS                          # Define quem revisa PRs (dono por arquivo/pasta)
 │   └── workflows/
-│       ├── ci.yml                        # CI (Atividade 1)
-│       ├── _reusable-test.yml            # Reusable workflow (workflow_call)
-│       ├── cd-provision.yml              # Provisiona AWS + kind + ingress
-│       ├── cd-rolling.yml                # Deploy Rolling
-│       ├── cd-blue-green.yml             # Deploy Blue/Green por cor
-│       ├── cd-blue-green-switch.yml      # Switch de tráfego + rollback
-│       ├── cd-destroy.yml                # Teardown parcial
-│       └── cd-destroy-full.yml           # Teardown total
+│       ├── ci.yml                          # CI: lint, pytest, pip-audit, Trivy em PR/push
+│       ├── _reusable-test.yml              # Workflow reutilizável (workflow_call) com steps de teste
+│       ├── cd-provision.yml                # Provisiona AWS (Terraform) + configura kind/ingress (Ansible)
+│       ├── cd-rolling.yml                  # Build+push da imagem e deploy Rolling no namespace rolling
+│       ├── cd-blue-green.yml               # Build+push e deploy no slot blue ou green (cor inativa)
+│       ├── cd-blue-green-switch.yml        # Faz o cutover: patch do Service active (switch e rollback)
+│       ├── cd-destroy.yml                  # Teardown parcial: destrói infra, mantém Key Pair e state
+│       └── cd-destroy-full.yml             # Teardown total: destrói infra, Key Pair, state e órfãos
 │
-├── terraform/                            # IaC da AWS
-│   ├── providers.tf
-│   ├── variables.tf
-│   ├── main.tf
-│   ├── outputs.tf
-│   └── user_data.sh
+├── terraform/                              # IaC da AWS (VPC, subnet, IGW, SG, EC2)
+│   ├── providers.tf                        # Declara provider AWS e versão do Terraform (state local)
+│   ├── variables.tf                        # Variáveis: região, tipo, key_name, CIDR, tamanho do disco
+│   ├── main.tf                             # Recursos AWS: VPC, subnet, IGW, route table, SG e EC2
+│   ├── outputs.tf                          # Outputs consumidos pelo workflow: IP público, ID, URL
+│   └── user_data.sh                        # Script de bootstrap da EC2 (Docker + grupo docker)
 │
-├── ansible/                              # Configuração da EC2
-│   ├── ansible.cfg
-│   └── playbook.yml
+├── ansible/                                # Configuração da EC2 após o provision
+│   ├── ansible.cfg                         # Configuração global: usuário, chave SSH, host key check
+│   └── playbook.yml                        # Instala kind, kubectl, ingress-nginx e cria namespaces
 │
-├── k8s/                                  # Manifestos Kubernetes
+├── k8s/                                    # Manifestos Kubernetes
 │   ├── rolling/
-│   │   ├── deployment.yaml
-│   │   ├── service.yaml
-│   │   └── ingress.yaml
+│   │   ├── deployment.yaml                 # Deployment Rolling (3 réplicas, APP_COLOR=purple)
+│   │   ├── service.yaml                    # Service ClusterIP interno do namespace rolling
+│   │   └── ingress.yaml                    # Ingress que expõe rolling.local → Service todolist
 │   └── blue-green/
-│       ├── deployment-blue.yaml
-│       ├── deployment-green.yaml
-│       ├── service-blue.yaml
-│       ├── service-green.yaml
-│       ├── service-active.yaml
-│       └── ingress.yaml
+│       ├── deployment-blue.yaml            # Deployment do slot blue (APP_COLOR=blue, labels slot=blue)
+│       ├── deployment-green.yaml           # Deployment do slot green (APP_COLOR=green, labels slot=green)
+│       ├── service-blue.yaml               # Service ClusterIP do slot blue (usado pelo smoke test)
+│       ├── service-green.yaml              # Service ClusterIP do slot green (usado pelo smoke test)
+│       ├── service-active.yaml             # Service ativo — o switch troca APENAS o selector dele
+│       └── ingress.yaml                    # Ingress aponta sempre para todolist-active em todolist.local
 │
 ├── docs/
-│   ├── ci-pipeline.md                    # Documentação detalhada do CI
-│   └── cd-pipeline.md                    # Documentação detalhada do CD
+│   ├── ci-pipeline.md                      # Documentação detalhada do CI (gates, matrix, reusable)
+│   └── cd-pipeline.md                      # Documentação detalhada do CD (arquitetura, deploy, rollback)
 │
-├── Dockerfile                            # Build da imagem
-├── app.py                                # Aplicação Flask
-├── test_app.py                           # Testes pytest
-├── requirements.txt                      # Deps de produção
-├── requirements-dev.txt                  # Deps de dev
-├── pyproject.toml                        # Config do ruff
-└── README.md                             # Este arquivo
+├── Dockerfile                              # Build da imagem da aplicação Flask usada nos deploys
+├── app.py                                  # Aplicação Flask (rotas / e /healthz usadas pelos gates)
+├── test_app.py                             # Testes unitários da aplicação (executados pelo pytest)
+├── requirements.txt                        # Dependências de produção (alvo do pip-audit e Trivy)
+├── requirements-dev.txt                    # Dependências de desenvolvimento (pytest, ruff, pip-audit)
+├── pyproject.toml                          # Configuração do ruff (lint) e metadados do projeto
+└── README.md                               # Documentação do grupo: arquitetura, comandos, rollback
 ```
 
 ---
