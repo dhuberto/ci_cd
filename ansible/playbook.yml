@@ -3,11 +3,18 @@
 # playbook.yml — configura a EC2 para receber deploys
 # =============================================================================
 # Usa hosts: all porque o inventário é passado inline pelo workflow.
-# Tasks que usam docker/kubectl rodam como root (become: true) porque o
-# ec2-user acabou de ser adicionado ao grupo docker e o grupo só passa a
-# valer em novas sessões SSH. Root não depende de grupo nenhum.
-# No fim, o kubeconfig do root é copiado para o ec2-user, para os
-# workflows de deploy (que rodam como ec2-user) conseguirem usar kubectl.
+#
+# Docker:
+#   - Limpa cache do DNF (execuções anteriores podem deixar resíduo)
+#   - Verifica se `docker` existe no PATH (não depende do systemd)
+#   - Se não existe, instala com --allowerasing (resolve curl/curl-minimal)
+#   - Só depois pede ao systemd para habilitar/iniciar
+#
+# kind/kubectl/namespaces rodam como root (become: true), o que evita o
+# problema de permission denied no docker.sock (o ec2-user acabou de ser
+# adicionado ao grupo docker, mas o grupo só vale em novas sessões SSH).
+#
+# No fim, o kubeconfig do root é copiado para o ec2-user.
 # =============================================================================
 
 - name: Configurar EC2 para o lab de CD
@@ -30,8 +37,24 @@
       changed_when: false
 
     # =========================================================================
-    # 2) Docker habilitado e rodando
+    # 2) Docker — verifica o binário, instala se necessário
     # =========================================================================
+    # `which docker` não falha se não achar (failed_when: false).
+    # O rc é 0 se achou, != 0 se não achou.
+    - name: Verificar se o binário docker existe
+      command: which docker
+      register: docker_bin
+      failed_when: false
+      changed_when: false
+
+    - name: Instalar docker se não existe
+      become: true
+      dnf:
+        name: docker
+        state: present
+        allowerasing: true
+      when: docker_bin.rc != 0
+
     - name: Garantir docker habilitado e rodando
       become: true
       systemd:
@@ -184,8 +207,6 @@
     # =========================================================================
     # 9) Copiar kubeconfig para o ec2-user
     # =========================================================================
-    # O kind criou o kubeconfig em /root/.kube/config (become: true).
-    # Os workflows de deploy rodam como ec2-user via SSH — precisam ver.
     - name: Criar diretório .kube do ec2-user
       become: true
       file:
