@@ -3,23 +3,23 @@
 # playbook.yml — configura a EC2 para receber deploys
 # =============================================================================
 # Usa hosts: all porque o inventário é passado inline pelo workflow
-# (`ansible-playbook -i "${EC2_IP}," playbook.yml`), que cria apenas o grupo
-# implícito "all" com o host único.
+# (`ansible-playbook -i "${EC2_IP}," playbook.yml`).
 #
-# Ordem das tarefas:
-#   1. dnf clean all — limpa cache corrompido de execuções anteriores
+# Tasks que usam docker/kubectl rodam como root (become: true) porque o
+# ec2-user acabou de ser adicionado ao grupo docker — o grupo só passa a
+# valer em novas sessões SSH, e o Ansible reusa a mesma conexão durante
+# todo o playbook. Root não depende de grupo nenhum.
+#
+# Ordem:
+#   1. dnf clean all
 #   2. Docker habilitado e rodando
 #   3. ec2-user no grupo docker
-#   4. Instalar kind em /usr/local/bin
-#   5. Instalar kubectl em /usr/local/bin (versão fixa)
-#   6. Criar kind-config.yaml
-#   7. Criar cluster kind (idempotente)
-#   8. Aplicar ingress-nginx
-#   9. Criar namespaces rolling e blue-green
-#
-# O user_data.sh já instala Docker. Não há fallback no playbook:
-# se o Docker não estiver presente, a task de systemd falha e o
-# problema é corrigido no user_data, não mascarado aqui.
+#   4. kind
+#   5. kubectl
+#   6. kind-config.yaml
+#   7. cluster kind
+#   8. ingress-nginx
+#   9. namespaces
 # =============================================================================
 
 - name: Configurar EC2 para o lab de CD
@@ -36,18 +36,14 @@
     # =========================================================================
     # 1) Limpar cache do DNF
     # =========================================================================
-    # O user_data.sh teve um `dnf update` que falhou em versões antigas do
-    # AL2023, deixando arquivos de cache corrompidos. `dnf clean all` remove
-    # tudo e força o DNF a repopular o cache na próxima operação.
     - name: Limpar cache do DNF
       become: true
       command: dnf clean all
       changed_when: false
 
     # =========================================================================
-    # 2) Garantir Docker habilitado e rodando
+    # 2) Docker habilitado e rodando
     # =========================================================================
-    # O user_data.sh instalou. Aqui só garantimos que o serviço está ativo.
     - name: Garantir docker habilitado e rodando
       become: true
       systemd:
@@ -63,7 +59,7 @@
         append: true
 
     # =========================================================================
-    # 3) kind — instala em /usr/local/bin
+    # 3) kind
     # =========================================================================
     - name: Instalar kind em /usr/local/bin
       become: true
@@ -84,7 +80,7 @@
       when: not kind_bin.stat.exists
 
     # =========================================================================
-    # 4) kubectl — versão fixa, caminho absoluto
+    # 4) kubectl
     # =========================================================================
     - name: Instalar kubectl em /usr/local/bin
       become: true
@@ -105,6 +101,7 @@
       when: not kubectl_bin.stat.exists
 
     - name: Confirmar que kubectl executa
+      become: true
       command: /usr/local/bin/kubectl version --client
       register: kubectl_check
       changed_when: false
@@ -114,7 +111,7 @@
         msg: "{{ kubectl_check.stdout_lines }}"
 
     # =========================================================================
-    # 5) kind-config.yaml — expõe as portas 80/443 do nó para o ingress
+    # 5) kind-config.yaml — arquivo na home do ec2-user
     # =========================================================================
     - name: Criar kind-config.yaml
       copy:
@@ -141,15 +138,17 @@
                 - { containerPort: 443, hostPort: 443, protocol: TCP }
 
     # =========================================================================
-    # 6) Cluster kind — idempotente
+    # 6) Cluster kind — roda como root (não depende do grupo docker)
     # =========================================================================
     - name: Verificar se o cluster kind já existe
+      become: true
       command: /usr/local/bin/kind get clusters
       register: kind_clusters
       failed_when: false
       changed_when: false
 
     - name: Criar cluster kind
+      become: true
       command: >
         /usr/local/bin/kind create cluster
         --name {{ kind_cluster_name }}
@@ -157,18 +156,21 @@
       when: kind_cluster_name not in kind_clusters.stdout
 
     - name: Aguardar o nó ficar Ready
+      become: true
       command: /usr/local/bin/kubectl wait --for=condition=Ready node --all --timeout=180s
       changed_when: false
 
     # =========================================================================
-    # 7) ingress-nginx — expõe o Ingress na porta 80 do nó
+    # 7) ingress-nginx
     # =========================================================================
     - name: Aplicar manifest do ingress-nginx (kind)
+      become: true
       command: >
         /usr/local/bin/kubectl apply -f
         https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
 
     - name: Aguardar ingress-nginx
+      become: true
       command: >
         /usr/local/bin/kubectl wait --namespace ingress-nginx
         --for=condition=ready pod
@@ -177,9 +179,10 @@
       changed_when: false
 
     # =========================================================================
-    # 8) Namespaces — rolling e blue-green
+    # 8) Namespaces
     # =========================================================================
     - name: Criar namespaces do lab
+      become: true
       command: /usr/local/bin/kubectl create ns {{ item }}
       register: ns_create
       failed_when: >
@@ -194,6 +197,7 @@
     # 9) Log final
     # =========================================================================
     - name: Mostrar nodes
+      become: true
       command: /usr/local/bin/kubectl get nodes -o wide
       register: nodes_out
       changed_when: false
