@@ -1,9 +1,14 @@
-# Destroi TUDO que o pipeline criou: infra, Key Pair, artifacts e state.
+# =============================================================================
+# CD - Destroy Full
+# =============================================================================
+# Destroi TUDO: infra, Key Pair, artifact do state, EC2 órfãs e SGs órfãos.
 # Uso: fim do curso / entrega, para deixar a conta AWS limpa.
 #
 # Depois deste workflow, a próxima execução do cd-provision vai gerar
-# um novo par de chaves SSH — o secret EC2_SSH_KEY precisa ser
-# recadastrado com a nova chave.
+# um novo par de chaves SSH — o secret EC2_SSH_KEY precisa ser recadastrado.
+#
+# Uso: Actions → CD - Destroy Full → Run workflow → confirm: DESTROY-ALL
+# =============================================================================
 name: CD - Destroy Full
 
 on:
@@ -14,6 +19,7 @@ on:
         required: true
         default: ''
 
+# Token mínimo: só leitura do repositório.
 permissions:
   contents: read
 
@@ -27,13 +33,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: aws
 
-    # Guard mais rígido que o Destroy Infra: exige DESTROY-ALL.
+    # Guard mais rígido: exige DESTROY-ALL.
     if: ${{ github.event.inputs.confirm == 'DESTROY-ALL' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
+      # Autenticação AWS via secrets do Environment aws.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
@@ -47,7 +54,7 @@ jobs:
         with:
           terraform_version: 1.7.5
 
-      # Baixa o state — para saber o que destruir.
+      # Baixa o state salvo pelo cd-provision.
       - name: Baixar state do Terraform
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
@@ -72,7 +79,7 @@ jobs:
         working-directory: terraform
         run: terraform init -input=false
 
-      # 1) Destroy da infra.
+      # 1) Destroy da infraestrutura gerenciada pelo Terraform.
       - name: Terraform destroy
         if: steps.check.outputs.found == 'true'
         working-directory: terraform
@@ -92,9 +99,9 @@ jobs:
             echo "Key Pair já não existia."
           fi
 
-      # 3) Segurança extra: procura e remove qualquer EC2 órfã com a tag do projeto.
-      #    Cobre o caso de execuções anteriores do provision terem criado EC2
-      #    sem que o state atual saiba.
+      # 3) Remove EC2 órfãs com a tag do projeto.
+      #    Cobre o caso de execuções antigas do provision terem criado
+      #    EC2 sem que o state atual saiba.
       - name: Remover EC2 órfãs com a tag do projeto
         run: |
           set -e
@@ -103,7 +110,7 @@ jobs:
                       "Name=instance-state-name,Values=pending,running,stopping,stopped" \
             --query 'Reservations[].Instances[].InstanceId' \
             --output text)
-          if [ -n "$IDS" ]; then
+          if [ -n "$IDS" ] && [ "$IDS" != "None" ]; then
             echo "Terminando instâncias órfãs: $IDS"
             aws ec2 terminate-instances --instance-ids $IDS
             aws ec2 wait instance-terminated --instance-ids $IDS
@@ -111,8 +118,7 @@ jobs:
             echo "Nenhuma EC2 órfã encontrada."
           fi
 
-      # 4) Segurança extra: remove Security Groups órfãos com o prefixo do projeto.
-      #    (Só remove se não estiverem associados a nada.)
+      # 4) Remove Security Groups órfãos com o nome do projeto.
       - name: Remover Security Groups órfãos
         run: |
           set -e
@@ -120,11 +126,15 @@ jobs:
             --filters "Name=group-name,Values=ci-cd-app-sg" \
             --query 'SecurityGroups[].GroupId' \
             --output text 2>/dev/null || true)
-          for SG in $SGS; do
-            aws ec2 delete-security-group --group-id $SG \
-              && echo "SG $SG removido." \
-              || echo "SG $SG em uso — pulando."
-          done
+          if [ -z "$SGS" ] || [ "$SGS" = "None" ]; then
+            echo "Nenhum SG órfão encontrado."
+          else
+            for SG in $SGS; do
+              aws ec2 delete-security-group --group-id $SG \
+                && echo "SG $SG removido." \
+                || echo "SG $SG em uso — pulando."
+            done
+          fi
 
       # 5) Limpa o artifact do state para o próximo provision começar limpo.
       - name: Remover artifact do state
@@ -141,9 +151,11 @@ jobs:
             echo "| Item | Status |"
             echo "|---|---|"
             echo "| VPC / subnet / IGW / SG / EC2 | destruídos |"
+            echo "| EC2 órfãs | verificadas e removidas |"
+            echo "| SG órfãos | verificados e removidos |"
             echo "| Key Pair \`ci-cd-deploy-key\` | **removido** |"
             echo "| Artifact \`terraform-state\` | **removido** |"
-            echo "| Secrets / Variables | mantidos (você decide remover manualmente) |"
+            echo "| Secrets / Variables | mantidos |"
             echo ""
             echo "### Próximos passos (uma vez)"
             echo "1. Rode **CD - Provision Infra** — vai gerar um novo par de chaves SSH"
