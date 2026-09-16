@@ -14,20 +14,31 @@ variable "instance_type" {
   default     = "t3.medium"
 }
 
-# Nome do Key Pair importado pelo workflow de provisionamento.
+# Tamanho do disco raiz em GB.
+# Mínimo 30: a AMI mais recente do AL2023 tem snapshot raiz de 30 GB.
+# Se aumentar no futuro, ajuste aqui — o workflow lê via TF_VAR_root_volume_size.
+variable "root_volume_size" {
+  description = "Tamanho do disco raiz em GB (mínimo 30)"
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.root_volume_size >= 30
+    error_message = "root_volume_size precisa ser >= 30 (snapshot raiz da AMI AL2023)."
+  }
+}
+
 variable "key_name" {
   description = "Nome do Key Pair na AWS"
   type        = string
 }
 
-# CIDR liberado para SSH (22) e API do k8s (6443).
 variable "allowed_cidr" {
   description = "CIDR liberado para SSH e API do k8s"
   type        = string
   default     = "0.0.0.0/0"
 }
 
-# Prefixo dos nomes dos recursos (tags).
 variable "project_name" {
   description = "Prefixo de nome dos recursos"
   type        = string
