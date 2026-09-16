@@ -1,0 +1,14 @@
+# Pipeline de Blue/Green — deploy no slot INATIVO.
+# O switch de tráfego é um workflow separado (cd-blue-green-switch.yml).
+name: CD - Blue/Green (deploy por cor)
+
+on:
+  workflow_dispatch:
+    inputs:
+      color:
+        description: "Cor alvo do deploy"
+        type: choice
+        options: [blue, green]
+        required: true
+      image_tag:
+        description: "Tag da
