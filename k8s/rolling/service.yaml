@@ -1,0 +1,14 @@
+# Service ClusterIP interno do Rolling — quem expõe para fora é o Ingress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: todolist
+  namespace: rolling
+spec:
+  type: ClusterIP
+  selector:
+    app: todolist
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000
