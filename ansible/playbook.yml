@@ -4,18 +4,22 @@
 # =============================================================================
 # Usa hosts: all porque o inventário é passado inline pelo workflow
 # (`ansible-playbook -i "${EC2_IP}," playbook.yml`), que cria apenas o grupo
-# implícito "all" com o host único. O grupo "ec2" só existiria se usássemos
-# o inventory.sh — que foi removido por não funcionar no GitHub Actions.
+# implícito "all" com o host único.
 #
 # Ordem das tarefas:
-#   1. Docker (fallback se user_data falhou)
-#   2. ec2-user no grupo docker
-#   3. Instalar kind em /usr/local/bin
-#   4. Instalar kubectl em /usr/local/bin (versão fixa)
-#   5. Criar kind-config.yaml
-#   6. Criar cluster kind (idempotente)
-#   7. Aplicar ingress-nginx
-#   8. Criar namespaces rolling e blue-green
+#   1. dnf clean all — limpa cache corrompido de execuções anteriores
+#   2. Docker habilitado e rodando
+#   3. ec2-user no grupo docker
+#   4. Instalar kind em /usr/local/bin
+#   5. Instalar kubectl em /usr/local/bin (versão fixa)
+#   6. Criar kind-config.yaml
+#   7. Criar cluster kind (idempotente)
+#   8. Aplicar ingress-nginx
+#   9. Criar namespaces rolling e blue-green
+#
+# O user_data.sh já instala Docker. Não há fallback no playbook:
+# se o Docker não estiver presente, a task de systemd falha e o
+# problema é corrigido no user_data, não mascarado aqui.
 # =============================================================================
 
 - name: Configurar EC2 para o lab de CD
@@ -30,22 +34,20 @@
 
   tasks:
     # =========================================================================
-    # 1) Docker — verifica e instala se necessário
+    # 1) Limpar cache do DNF
     # =========================================================================
-    - name: Verificar se docker existe
-      command: docker --version
-      register: docker_check
-      failed_when: false
+    # O user_data.sh teve um `dnf update` que falhou em versões antigas do
+    # AL2023, deixando arquivos de cache corrompidos. `dnf clean all` remove
+    # tudo e força o DNF a repopular o cache na próxima operação.
+    - name: Limpar cache do DNF
+      become: true
+      command: dnf clean all
       changed_when: false
 
-    - name: Instalar docker (fallback se user_data falhou)
-      become: true
-      dnf:
-        name: docker
-        state: present
-        allowerasing: true
-      when: docker_check.rc != 0
-
+    # =========================================================================
+    # 2) Garantir Docker habilitado e rodando
+    # =========================================================================
+    # O user_data.sh instalou. Aqui só garantimos que o serviço está ativo.
     - name: Garantir docker habilitado e rodando
       become: true
       systemd:
@@ -61,7 +63,7 @@
         append: true
 
     # =========================================================================
-    # 2) kind — instala em /usr/local/bin
+    # 3) kind — instala em /usr/local/bin
     # =========================================================================
     - name: Instalar kind em /usr/local/bin
       become: true
@@ -82,7 +84,7 @@
       when: not kind_bin.stat.exists
 
     # =========================================================================
-    # 3) kubectl — versão fixa, caminho absoluto
+    # 4) kubectl — versão fixa, caminho absoluto
     # =========================================================================
     - name: Instalar kubectl em /usr/local/bin
       become: true
@@ -112,7 +114,7 @@
         msg: "{{ kubectl_check.stdout_lines }}"
 
     # =========================================================================
-    # 4) kind-config.yaml — expõe as portas 80/443 do nó para o ingress
+    # 5) kind-config.yaml — expõe as portas 80/443 do nó para o ingress
     # =========================================================================
     - name: Criar kind-config.yaml
       copy:
@@ -139,7 +141,7 @@
                 - { containerPort: 443, hostPort: 443, protocol: TCP }
 
     # =========================================================================
-    # 5) Cluster kind — idempotente
+    # 6) Cluster kind — idempotente
     # =========================================================================
     - name: Verificar se o cluster kind já existe
       command: /usr/local/bin/kind get clusters
@@ -159,7 +161,7 @@
       changed_when: false
 
     # =========================================================================
-    # 6) ingress-nginx — expõe o Ingress na porta 80 do nó
+    # 7) ingress-nginx — expõe o Ingress na porta 80 do nó
     # =========================================================================
     - name: Aplicar manifest do ingress-nginx (kind)
       command: >
@@ -175,7 +177,7 @@
       changed_when: false
 
     # =========================================================================
-    # 7) Namespaces — rolling e blue-green
+    # 8) Namespaces — rolling e blue-green
     # =========================================================================
     - name: Criar namespaces do lab
       command: /usr/local/bin/kubectl create ns {{ item }}
@@ -189,7 +191,7 @@
         - blue-green
 
     # =========================================================================
-    # 8) Log final — ajuda a debugar no log do Actions
+    # 9) Log final
     # =========================================================================
     - name: Mostrar nodes
       command: /usr/local/bin/kubectl get nodes -o wide
