@@ -8,8 +8,8 @@
 #   1. Autentica na AWS
 #   2. Baixa o state anterior (se existir) — permite reconciliar
 #   3. Gera chave SSH nova e importa a pública na AWS
-#   4. Terraform apply (com continue-on-error para NÃO abortar o job)
-#   5. Salva o state como artifact (sempre, mesmo se apply falhar)
+#   4. Terraform plan + apply (com continue-on-error para não abortar)
+#   5. Salva o state como artifact (sempre)
 #   6. Falha o job se o apply falhou
 #   7. Aguarda SSH, roda Ansible
 #   8. Publica chave privada como artifact ec2-ssh-key (1 dia)
@@ -89,32 +89,34 @@ jobs:
         run: terraform init -input=false
 
       # Plan: mostra o que vai ser feito antes de aplicar.
+      # TF_VAR_root_volume_size é obrigatório por causa da validation no variables.tf.
       - name: Terraform plan
         working-directory: terraform
         env:
-          TF_VAR_aws_region:    ${{ vars.AWS_REGION }}
-          TF_VAR_instance_type: ${{ vars.TF_INSTANCE_TYPE }}
-          TF_VAR_key_name:      ci-cd-deploy-key
+          TF_VAR_aws_region:        ${{ vars.AWS_REGION }}
+          TF_VAR_instance_type:     ${{ vars.TF_INSTANCE_TYPE }}
+          TF_VAR_key_name:          ci-cd-deploy-key
+          TF_VAR_root_volume_size:  30
         run: terraform plan -input=false -out=tfplan
 
-      # Apply. continue-on-error permite capturar o state mesmo em falha,
-      # para o job seguinte (o destroy) saber o que ficou pela metade.
+      # Apply. continue-on-error permite capturar o state mesmo em falha.
+      # TF_VAR_root_volume_size idem, obrigatório pela validation.
       - name: Terraform apply
         id: tf
         continue-on-error: true
         working-directory: terraform
         env:
-          TF_VAR_aws_region:    ${{ vars.AWS_REGION }}
-          TF_VAR_instance_type: ${{ vars.TF_INSTANCE_TYPE }}
-          TF_VAR_key_name:      ci-cd-deploy-key
+          TF_VAR_aws_region:        ${{ vars.AWS_REGION }}
+          TF_VAR_instance_type:     ${{ vars.TF_INSTANCE_TYPE }}
+          TF_VAR_key_name:          ci-cd-deploy-key
+          TF_VAR_root_volume_size:  30
         run: |
           terraform apply -input=false -auto-approve tfplan
           echo "public_ip=$(terraform output -raw instance_public_ip 2>/dev/null || echo 'n/a')" >> $GITHUB_OUTPUT
           echo "instance_id=$(terraform output -raw instance_id 2>/dev/null || echo 'n/a')"       >> $GITHUB_OUTPUT
           echo "app_url=$(terraform output -raw application_url 2>/dev/null || echo 'n/a')"       >> $GITHUB_OUTPUT
 
-      # Salva o state MESMO se o apply falhou. Assim o destroy consegue
-      # limpar o que ficou pela metade.
+      # Salva o state MESMO se o apply falhou.
       - name: Salvar state do Terraform (sempre)
         if: always()
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
