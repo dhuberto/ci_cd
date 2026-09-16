@@ -1,0 +1,49 @@
+# Slot BLUE. A cor (APP_COLOR=blue) é o que muda na interface ao vivo
+# quando o switch de tráfego aponta o Service ativo para este slot.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todolist-blue
+  namespace: blue-green
+  labels:
+    app: todolist
+    slot: blue
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: todolist
+      slot: blue
+  template:
+    metadata:
+      labels:
+        app: todolist
+        slot: blue
+    spec:
+      containers:
+        - name: app
+          image: IMAGE_PLACEHOLDER
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+          env:
+            - name: APP_NAME
+              value: "TodoList Blue"
+            - name: APP_COLOR
+              value: "blue"
+            - name: APP_PORT
+              value: "5000"
+            - name: SESSION_KEY
+              value: "blue-session-key"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 10
