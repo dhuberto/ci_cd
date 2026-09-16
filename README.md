@@ -40,50 +40,50 @@ Settings > Branches		Regra para main com: Require PR + 1 approval
 ```
 ci_cd/
 ├── .github/
-│   ├── CODEOWNERS
+│   ├── CODEOWNERS                                # Define quem revisa PRs em quais arquivos
 │   └── workflows/
-│       ├── ci.yml
-│       ├── _reusable-test.yml
-│       ├── cd-provision.yml
-│       ├── cd-rolling.yml
-│       ├── cd-blue-green.yml
-│       └── cd-blue-green-switch.yml
+│       ├── ci.yml                                # Pipeline de CI: roda em PR/push com pytest, pip-audit, matrix e Trivy
+│       ├── _reusable-test.yml                    # Workflow reutilizável (workflow_call) com os steps de teste
+│       ├── cd-provision.yml                      # Provisiona AWS via Terraform e configura kind+ingress na EC2 via Ansible
+│       ├── cd-rolling.yml                        # Build+push da imagem e deploy Rolling Update no namespace rolling
+│       ├── cd-blue-green.yml                     # Build+push e deploy no slot blue ou green (cor inativa)
+│       └── cd-blue-green-switch.yml              # Faz o cutover: patch do Service active (switch e rollback)
 │
 ├── terraform/
-│   ├── providers.tf
-│   ├── variables.tf
-│   ├── main.tf
-│   ├── outputs.tf
-│   └── user_data.sh
+│   ├── providers.tf                              # Declara provider AWS e versão do Terraform (state local no runner)
+│   ├── variables.tf                              # Variáveis do Terraform: região, tipo da instância, key_name, CIDR
+│   ├── main.tf                                   # Recursos AWS: VPC, subnet, IGW, route table, SG e EC2
+│   ├── outputs.tf                                # Outputs consumidos pelo workflow: IP público, ID, URL
+│   └── user_data.sh                              # Script de bootstrap da EC2: instala Docker e adiciona ec2-user ao grupo
 │
 ├── ansible/
-│   ├── ansible.cfg
-│   ├── inventory.sh
-│   └── playbook.yml
+│   ├── ansible.cfg                               # Configuração do Ansible: inventory, usuário, chave SSH
+│   ├── inventory.sh                              # Gera o inventory dinâmico a partir da variável EC2_IP
+│   └── playbook.yml                              # Instala kind, kubectl, cria cluster e ingress-nginx, cria namespaces
 │
 ├── k8s/
 │   ├── rolling/
-│   │   ├── deployment.yaml
-│   │   ├── service.yaml
-│   │   └── ingress.yaml
+│   │   ├── deployment.yaml                       # Deployment do Rolling Update (3 réplicas, strategy RollingUpdate)
+│   │   ├── service.yaml                          # Service ClusterIP interno do namespace rolling
+│   │   └── ingress.yaml                          # Ingress que expõe rolling.local → Service todolist
 │   └── blue-green/
-│       ├── deployment-blue.yaml
-│       ├── deployment-green.yaml
-│       ├── service-blue.yaml
-│       ├── service-green.yaml
-│       ├── service-active.yaml
-│       └── ingress.yaml
+│       ├── deployment-blue.yaml                  # Deployment do slot blue (APP_COLOR=blue, labels slot=blue)
+│       ├── deployment-green.yaml                 # Deployment do slot green (APP_COLOR=green, labels slot=green)
+│       ├── service-blue.yaml                     # Service ClusterIP do slot blue (usado pelo smoke test)
+│       ├── service-green.yaml                    # Service ClusterIP do slot green (usado pelo smoke test)
+│       ├── service-active.yaml                   # Service ativo — o switch de tráfego só troca o selector dele
+│       └── ingress.yaml                          # Ingress aponta sempre para todolist-active em todolist.local
 │
 ├── docs/
-│   ├── ci-pipeline.md
-│   └── cd-pipeline.md
+│   ├── ci-pipeline.md                            # Documentação do pipeline de CI (gates, matrix, reusable)
+│   └── cd-pipeline.md                            # Documentação do pipeline de CD (arquitetura, deploy, rollback)
 │
-├── Dockerfile
-├── app.py
-├── requirements.txt
-├── requirements-dev.txt
-├── test_app.py
-└── README.md                     # Testes unitários da aplicação
+├── Dockerfile                                    # Build da imagem da aplicação Flask usada nos deploys
+├── app.py                                        # Aplicação Flask com rotas / e /healthz usadas pelos gates
+├── requirements.txt                              # Dependências de produção (alvo do pip-audit e Trivy)
+├── requirements-dev.txt                          # Dependências de desenvolvimento (pytest, ruff, pip-audit)
+├── test_app.py                                   # Testes unitários da aplicação
+└── README.md                                     # Documentação do grupo: arquitetura, comandos, rollback
 ```
 # CI/CD - Grupo dhuberto
 
