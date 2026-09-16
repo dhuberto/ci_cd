@@ -172,7 +172,7 @@ jobs:
 
       # Limpeza final: artifact do state.
       - name: Remover artifact do state
-        uses: geekyeggo/delete-artifact@f275313e70c08f6120db482d7c247f020fe431e0 # v5.0.0
+        uses: geekyeggo/delete-artifact@v5
         with:
           name: terraform-state
         continue-on-error: true
