@@ -12,7 +12,8 @@
 # =============================================================================
 
 # AMI: pega a Amazon Linux 2023 x86_64 mais recente.
-# O data source expõe root_device_size, usado para dimensionar o disco.
+# O tamanho do disco raiz vem de var.root_volume_size (não do data source,
+# que NÃO expõe root_device_size).
 data "aws_ami" "al2023" {
   most_recent = true
   owners      = ["amazon"]
@@ -111,11 +112,9 @@ resource "aws_security_group" "web" {
 
 # EC2 — roda o user_data.sh no boot. O Ansible configura o resto depois.
 #
-# volume_size = root_device_size da AMI:
-#   A AMI do AL2023 muda de tamanho ao longo do tempo (a AWS publica novas
-#   versões do snapshot raiz). Hardcodar 20 quebra quando a AWS publica uma
-#   AMI com snapshot maior. Ler do data source evita essa quebra.
-#   max() garante que nunca fica abaixo do snapshot, mesmo se a AMI encolher.
+# volume_size vem de var.root_volume_size (default 30).
+# NÃO usar data.aws_ami.al2023.root_device_size — esse atributo não existe
+# no data source da AWS. A variável permite controle e tem validação >= 30.
 resource "aws_instance" "web" {
   ami                    = data.aws_ami.al2023.id
   instance_type          = var.instance_type
@@ -125,7 +124,7 @@ resource "aws_instance" "web" {
   user_data              = file("${path.module}/user_data.sh")
 
   root_block_device {
-    volume_size = max(30, data.aws_ami.al2023.root_device_size)
+    volume_size = var.root_volume_size
     volume_type = "gp3"
   }
 
