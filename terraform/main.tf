@@ -13,7 +13,6 @@
 
 # AMI: pega a Amazon Linux 2023 PADRÃO (x86_64), excluindo variantes
 # ECS Optimized, EKS Optimized e Minimal.
-# Filtros combinados (name + description + architecture + virtualization-type).
 data "aws_ami" "al2023" {
   most_recent = true
   owners      = ["amazon"]
@@ -135,10 +134,9 @@ resource "aws_security_group" "web" {
 # =============================================================================
 # EC2
 # =============================================================================
+
 # Roda o user_data.sh no boot. O Ansible configura kind + ingress depois.
-#
 # volume_size vem de var.root_volume_size (default 30).
-# NÃO usar data.aws_ami.al2023.root_device_size — esse atributo não existe.
 resource "aws_instance" "web" {
   ami                    = data.aws_ami.al2023.id
   instance_type          = var.instance_type
