@@ -1,6 +1,22 @@
-# Provisiona a infraestrutura: Terraform cria VPC/SG/EC2 na AWS,
-# Ansible instala kind + ingress-nginx + namespaces na EC2.
-# Roda uma vez por sessão (o IP muda ao reiniciar a instância no Learner Lab).
+# =============================================================================
+# CD - Provision Infra
+# =============================================================================
+# Provisiona AWS via Terraform e configura kind + ingress-nginx + namespaces
+# na EC2 via Ansible.
+#
+# Fluxo:
+#   1. Autentica na AWS
+#   2. Baixa o state anterior (se existir) — permite reconciliar em vez de
+#      criar EC2 nova a cada execução
+#   3. Gera chave SSH nova e importa a pública na AWS
+#   4. Terraform apply (cria ou atualiza VPC, SG, EC2)
+#   5. Aguarda SSH da EC2
+#   6. Ansible: instala Docker/kind/kubectl, cria cluster e ingress-nginx
+#   7. Publica a chave privada como artifact ec2-ssh-key (retenção 1 dia)
+#   8. Publica o state como artifact terraform-state (retenção 7 dias)
+#
+# Uso: Actions → CD - Provision Infra → Run workflow
+# =============================================================================
 name: CD - Provision Infra
 
 on:
@@ -9,11 +25,11 @@ on:
     tags:
       - 'v*'
 
-# Token do GITHUB_TOKEN com permissão mínima: só leitura do repo.
+# Token mínimo: só leitura do repositório.
 permissions:
   contents: read
 
-# Evita duas execuções simultâneas de provisionamento.
+# Evita provisionamentos simultâneos.
 concurrency:
   group: provision-${{ github.ref }}
   cancel-in-progress: false
@@ -32,7 +48,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      # Autenticação AWS — usa os secrets do Environment "aws".
+      # Autenticação AWS via secrets do Environment aws.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
@@ -45,6 +61,15 @@ jobs:
         uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: 1.7.5
+
+      # Baixa o state salvo por execução anterior (se existir).
+      # Sem isso, cada provision criaria uma EC2 nova em vez de reconciliar.
+      - name: Baixar state do Terraform
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: terraform-state
+          path: terraform/
+        continue-on-error: true
 
       # Gera o par de chaves no próprio runner. A pública vai para a AWS,
       # a privada é publicada como artifact para o aluno cadastrar no secret.
@@ -118,6 +143,16 @@ jobs:
           name: ec2-ssh-key
           path: ~/.ssh/deploy_key
           retention-days: 1
+
+      # Salva o state como artifact para os workflows de destroy e para o
+      # próximo provision poder reconciliar em vez de criar do zero.
+      - name: Salvar state do Terraform
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: terraform-state
+          path: terraform/terraform.tfstate
+          retention-days: 7
 
       # Summary com os próximos passos manuais (uma vez por sessão).
       - name: Resumo
