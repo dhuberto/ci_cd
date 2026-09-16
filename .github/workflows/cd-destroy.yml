@@ -1,0 +1,101 @@
+# Destroi a infraestrutura (VPC, subnet, IGW, SG, EC2) SEM mexer
+# em Key Pair nem em artifacts. Uso: fim do dia de trabalho, para parar
+# de consumir crédito sem perder o contexto da sessão.
+#
+# O Key Pair ci-cd-deploy-key e o artifact terraform-state são mantidos —
+# assim o próximo cd-provision reaproveita a mesma chave SSH e o state.
+name: CD - Destroy Infra
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Digite DESTROY (maiúsculas) para confirmar'
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: destroy
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    name: Destroy AWS infra
+    runs-on: ubuntu-latest
+    environment: aws
+
+    # Guard: só roda se o input confirm for exatamente DESTROY.
+    if: ${{ github.event.inputs.confirm == 'DESTROY' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region:            ${{ vars.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.7.5
+
+      # Baixa o state salvo pelo cd-provision. Sem ele, o Terraform
+      # não sabe qual EC2 destruir.
+      - name: Baixar state do Terraform
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: terraform-state
+          path: terraform/
+        continue-on-error: true
+
+      - name: Verificar se o state existe
+        id: check
+        working-directory: terraform
+        run: |
+          if [ -f terraform.tfstate ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "State encontrado."
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "State NÃO encontrado — nada a destruir."
+          fi
+
+      - name: Terraform init
+        if: steps.check.outputs.found == 'true'
+        working-directory: terraform
+        run: terraform init -input=false
+
+      # Só isso: destrói tudo o que o Terraform criou.
+      # Key Pair NÃO é gerenciado pelo Terraform (importado via CLI),
+      # então sobrevive a este destroy.
+      - name: Terraform destroy
+        if: steps.check.outputs.found == 'true'
+        working-directory: terraform
+        env:
+          TF_VAR_aws_region:    ${{ vars.AWS_REGION }}
+          TF_VAR_instance_type: ${{ vars.TF_INSTANCE_TYPE }}
+          TF_VAR_key_name:      ci-cd-deploy-key
+        run: terraform destroy -auto-approve -input=false
+
+      - name: Resumo
+        run: |
+          {
+            echo "### Destroy Infra concluído"
+            echo ""
+            echo "| Item | Status |"
+            echo "|---|---|"
+            echo "| EC2 / VPC / SG | destruídos (se state encontrado) |"
+            echo "| Key Pair \`ci-cd-deploy-key\` | **mantido** |"
+            echo "| Artifact \`terraform-state\` | **mantido** |"
+            echo "| Secrets / Variables | **mantidos** |"
+            echo ""
+            echo "Para recriar: **CD - Provision Infra → Run workflow**"
+          } >> $GITHUB_STEP_SUMMARY
