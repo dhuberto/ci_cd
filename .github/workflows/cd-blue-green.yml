@@ -1,6 +1,18 @@
-# Pipeline de Blue/Green — deploy no slot INATIVO.
-# O switch de tráfego é um workflow separado (cd-blue-green-switch.yml).
-# Fluxo: build+push da imagem → aplicar base + deployment da cor → smoke no slot.
+# =============================================================================
+# CD - Blue/Green (deploy por cor)
+# =============================================================================
+# Fluxo:
+#   1. Build + push da imagem para o GHCR
+#   2. SSH na EC2
+#   3. Cria imagePullSecret no namespace blue-green
+#   4. Aplica os Services (blue, green, active) + Ingress
+#   5. Aplica o deployment da cor alvo (blue ou green)
+#   6. Smoke test direto no pod da cor (sem mexer no tráfego)
+#
+# O switch de tráfego é feito por outro workflow: cd-blue-green-switch.yml.
+#
+# Uso: Actions → CD - Blue/Green (deploy por cor) → Run workflow
+# =============================================================================
 name: CD - Blue/Green (deploy por cor)
 
 on:
@@ -12,7 +24,7 @@ on:
         options: [blue, green]
         required: true
       image_tag:
-        description: "Tag da imagem Docker (deixe 'latest' ou informe um SHA curto)"
+        description: "Tag da imagem (deixe 'latest' para usar o SHA do commit)"
         required: true
         default: latest
 
@@ -35,20 +47,20 @@ jobs:
     environment: aws
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
 
       - name: Setup Buildx
-        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+        uses: docker/setup-buildx-action@v3
 
       - name: Login GHCR
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build & Push
-        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -70,10 +82,77 @@ jobs:
     environment: aws
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
 
       - name: Configurar chave SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600
+          chmod 600 ~/.ssh/deploy_key
+
+      # Renderiza o deployment da cor alvo substituindo IMAGE_PLACEHOLDER.
+      - name: Renderizar deployment da cor alvo
+        run: |
+          sed -i "s|IMAGE_PLACEHOLDER|${{ env.IMAGE_NAME }}|g" \
+            k8s/blue-green/deployment-${{ inputs.color }}.yaml
+
+      # Copia os manifestos base (services + ingress) para a EC2.
+      - name: Copiar manifestos base
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }} "mkdir -p ~/blue-green"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            k8s/blue-green/service-blue.yaml \
+            k8s/blue-green/service-green.yaml \
+            k8s/blue-green/service-active.yaml \
+            k8s/blue-green/ingress.yaml \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }}:/home/ec2-user/blue-green/
+
+      # Copia o deployment da cor alvo.
+      - name: Copiar deployment da cor alvo
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            k8s/blue-green/deployment-${{ inputs.color }}.yaml \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }}:/home/ec2-user/blue-green/
+
+      # Cria/atualiza o imagePullSecret no namespace blue-green.
+      - name: Criar imagePullSecret no namespace blue-green
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }} \
+            "/usr/local/bin/kubectl -n blue-green create secret docker-registry ghcr-secret \
+               --docker-server=ghcr.io \
+               --docker-username=${{ github.actor }} \
+               --docker-password=${{ secrets.GITHUB_TOKEN }} \
+               --dry-run=client -o yaml | /usr/local/bin/kubectl apply -f -"
+
+      # Aplica services e ingress primeiro, depois o deployment da cor.
+      - name: Aplicar base + deployment da cor
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }} \
+            '/usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/service-blue.yaml && \
+             /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/service-green.yaml && \
+             /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/service-active.yaml && \
+             /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/ingress.yaml && \
+             /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/deployment-${{ inputs.color }}.yaml && \
+             /usr/local/bin/kubectl -n blue-green rollout status deploy/todolist-${{ inputs.color }} --timeout=180s'
+
+      # Smoke test direto no pod da cor alvo (sem tocar no tráfego ativo).
+      - name: Smoke test no slot
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }} \
+            '/usr/local/bin/kubectl -n blue-green run smoke-${{ inputs.color }} \
+               --rm -i --restart=Never --image=curlimages/curl -- \
+               curl -sf http://todolist-${{ inputs.color }}:5000/healthz'
+
+      - name: Resumo
+        run: |
+          {
+            echo "### Deploy na cor \`${{ inputs.color }}\` concluído"
+            echo ""
+            echo "- Imagem: \`${{ env.IMAGE_NAME }}\`"
+            echo "- O tráfego AINDA NÃO foi alterado."
+            echo "- Para ativar: rode **CD - Blue/Green (switch de tráfego)** com a mesma cor."
+          } >> $GITHUB_STEP_SUMMARY
