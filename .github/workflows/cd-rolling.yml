@@ -1,12 +1,23 @@
-# Pipeline de Rolling Update.
-# Fluxo: build+push da imagem → aplicar manifestos → rollout status → smoke test.
+# =============================================================================
+# CD - Rolling Update
+# =============================================================================
+# Fluxo:
+#   1. Build + push da imagem para o GHCR
+#   2. SSH na EC2
+#   3. Cria imagePullSecret no namespace rolling (a imagem é privada)
+#   4. Aplica os manifestos (deployment + service + ingress)
+#   5. Aguarda rollout
+#   6. Smoke test via Ingress
+#
+# Uso: Actions → CD - Rolling Update → Run workflow → image_tag: latest
+# =============================================================================
 name: CD - Rolling Update
 
 on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Tag da imagem Docker (deixe 'latest' ou informe um SHA curto)"
+        description: "Tag da imagem (deixe 'latest' para usar o SHA do commit)"
         required: true
         default: latest
 
@@ -19,7 +30,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Se o input for 'latest', usa o SHA do commit. Caso contrário, usa o valor informado.
+  # Se image_tag for 'latest', usa o SHA do commit. Caso contrário, usa o valor.
   IMAGE_TAG: ${{ inputs.image_tag == 'latest' && github.sha || inputs.image_tag }}
   IMAGE_NAME: ghcr.io/${{ github.repository }}:${{ inputs.image_tag == 'latest' && github.sha || inputs.image_tag }}
 
@@ -29,23 +40,22 @@ jobs:
     runs-on: ubuntu-latest
     environment: aws
     steps:
-      # Sem 'ref' — o checkout usa o SHA do evento por padrão.
-      # Passar 'ref: image_tag' quebrava com 'latest' (não é branch/tag do Git).
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
 
       - name: Setup Buildx
-        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+        uses: docker/setup-buildx-action@v3
 
+      # Login no GHCR com GITHUB_TOKEN (não precisa de secret extra).
       - name: Login GHCR
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build & Push
-        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -67,7 +77,7 @@ jobs:
     environment: aws
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
 
       - name: Configurar chave SSH
         run: |
@@ -86,6 +96,18 @@ jobs:
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             k8s/rolling/*.yaml \
             ec2-user@${{ vars.EC2_PUBLIC_IP }}:/home/ec2-user/rolling/
+
+      # Cria/atualiza o imagePullSecret no namespace rolling.
+      # Sem isso, o kubelet não consegue puxar a imagem privada do GHCR.
+      - name: Criar imagePullSecret no namespace rolling
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }} \
+            "/usr/local/bin/kubectl -n rolling create secret docker-registry ghcr-secret \
+               --docker-server=ghcr.io \
+               --docker-username=${{ github.actor }} \
+               --docker-password=${{ secrets.GITHUB_TOKEN }} \
+               --dry-run=client -o yaml | /usr/local/bin/kubectl apply -f -"
 
       # Caminho absoluto do kubectl: o SSH não-interativo não carrega
       # /etc/profile.d/, então 'kubectl' puro dá 'command not found'.
