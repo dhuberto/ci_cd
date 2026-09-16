@@ -6,12 +6,12 @@
 #
 # Fluxo:
 #   1. Autentica na AWS
-#   2. Baixa o state anterior (se existir) — permite reconciliar
+#   2. Baixa o state anterior (se existir)
 #   3. Gera chave SSH nova e importa a pública na AWS
-#   4. Terraform plan + apply (com continue-on-error para não abortar)
+#   4. Terraform plan + apply
 #   5. Salva o state como artifact (sempre)
 #   6. Falha o job se o apply falhou
-#   7. Aguarda SSH, roda Ansible
+#   7. Aguarda SSH, roda Ansible (inventário inline)
 #   8. Publica chave privada como artifact ec2-ssh-key (1 dia)
 #
 # Uso: Actions → CD - Provision Infra → Run workflow
@@ -100,7 +100,6 @@ jobs:
         run: terraform plan -input=false -out=tfplan
 
       # Apply. continue-on-error permite capturar o state mesmo em falha.
-      # TF_VAR_root_volume_size idem, obrigatório pela validation.
       - name: Terraform apply
         id: tf
         continue-on-error: true
@@ -126,7 +125,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      # Se o apply falhou, para aqui — não faz sentido seguir para Ansible.
+      # Se o apply falhou, para aqui.
       - name: Falhar se o apply falhou
         if: steps.tf.outcome == 'failure'
         run: |
@@ -153,17 +152,18 @@ jobs:
           exit 1
 
       # Ansible configura a EC2.
+      # -i "${EC2_IP}," (vírgula no final) = inventário inline, host único.
+      # Evita o inventory.sh que não funciona no runner por falta de bit +x.
       - name: Ansible provision
         working-directory: ansible
         env:
           EC2_IP: ${{ steps.tf.outputs.public_ip }}
         run: |
-          chmod +x inventory.sh
-          ansible-playbook playbook.yml
+          ansible-playbook -i "${EC2_IP}," playbook.yml
 
       # Publica a chave privada como artifact temporário.
       - name: Upload chave SSH como artifact
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@b4b15b8b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: ec2-ssh-key
           path: ~/.ssh/deploy_key
