@@ -1,0 +1,86 @@
+# =============================================================================
+# CD - Blue/Green (switch de tráfego)
+# =============================================================================
+# Faz o cutover: troca o selector do Service "todolist-active" para a cor
+# informada. É o ÚNICO ponto de mudança entre blue e green — mudança
+# atômica, reversível, sem recriar pods nem esperar rollout.
+#
+# Uso:
+#   - Ativar green: Run workflow → color: green
+#   - Rollback para blue: Run workflow → color: blue
+# =============================================================================
+name: CD - Blue/Green (switch de tráfego)
+
+on:
+  workflow_dispatch:
+    inputs:
+      color:
+        description: "Cor que vai receber o tráfego (blue = atual, green = nova)"
+        type: choice
+        options: [blue, green]
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-green-switch
+  cancel-in-progress: false
+
+jobs:
+  switch:
+    name: Switch para ${{ inputs.color }}
+    runs-on: ubuntu-latest
+    environment: aws
+    steps:
+      - name: Configurar chave SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      # O switch é só um patch no selector do Service active.
+      # kubectl patch é atômico e não recria nada.
+      - name: Patch do Service (cutover mínimo e reversível)
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }} \
+            '/usr/local/bin/kubectl -n blue-green patch svc todolist-active \
+               -p "{\"spec\":{\"selector\":{\"app\":\"todolist\",\"slot\":\"${{ inputs.color }}\"}}}"'
+
+      # Confirma que o selector foi realmente trocado.
+      - name: Confirmar selector
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }} \
+            '/usr/local/bin/kubectl -n blue-green get svc todolist-active \
+               -o jsonpath="{.spec.selector}"'
+
+      # Valida o caminho completo: navegador → ingress → active → pod.
+      - name: Validar tráfego via Ingress
+        run: |
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Host: todolist.local" \
+              http://${{ vars.EC2_PUBLIC_IP }}/healthz || true)
+            if [ "$code" = "200" ]; then
+              echo "Smoke OK (tentativa $i)"
+              exit 0
+            fi
+            echo "tentativa $i — code=$code"
+            sleep 3
+          done
+          echo "Switch aplicado, mas o smoke test via Ingress falhou." >&2
+          exit 1
+
+      - name: Resumo
+        run: |
+          {
+            echo "### Switch concluído"
+            echo ""
+            echo "- Cor ativa agora: \`${{ inputs.color }}\`"
+            echo "- Serviço de tráfego: \`todolist-active\` → \`slot=${{ inputs.color }}\`"
+            echo "- Host: \`todolist.local\`"
+            echo ""
+            echo "**Rollback:** rode este workflow novamente com a cor contrária."
+          } >> $GITHUB_STEP_SUMMARY
