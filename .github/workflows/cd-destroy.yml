@@ -1,9 +1,13 @@
-# Destroi a infraestrutura (VPC, subnet, IGW, SG, EC2) SEM mexer
-# em Key Pair nem em artifacts. Uso: fim do dia de trabalho, para parar
-# de consumir crédito sem perder o contexto da sessão.
+# =============================================================================
+# CD - Destroy Infra
+# =============================================================================
+# Destroi VPC, subnet, IGW, SG e EC2 — mas PRESERVA:
+#   - Key Pair ci-cd-deploy-key (próximo provision reutiliza a mesma chave)
+#   - Artifact terraform-state (próximo provision reconcilia)
+#   - Secrets e variables do Environment aws
 #
-# O Key Pair ci-cd-deploy-key e o artifact terraform-state são mantidos —
-# assim o próximo cd-provision reaproveita a mesma chave SSH e o state.
+# Uso: Actions → CD - Destroy Infra → Run workflow → confirm: DESTROY
+# =============================================================================
 name: CD - Destroy Infra
 
 on:
@@ -14,9 +18,11 @@ on:
         required: true
         default: ''
 
+# Token mínimo: só leitura do repositório.
 permissions:
   contents: read
 
+# Evita duas execuções simultâneas de destroy.
 concurrency:
   group: destroy
   cancel-in-progress: false
@@ -27,13 +33,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: aws
 
-    # Guard: só roda se o input confirm for exatamente DESTROY.
+    # Guard: só roda se o input for exatamente DESTROY.
     if: ${{ github.event.inputs.confirm == 'DESTROY' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
+      # Autenticação AWS via secrets do Environment aws.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
@@ -73,9 +80,8 @@ jobs:
         working-directory: terraform
         run: terraform init -input=false
 
-      # Só isso: destrói tudo o que o Terraform criou.
-      # Key Pair NÃO é gerenciado pelo Terraform (importado via CLI),
-      # então sobrevive a este destroy.
+      # Destrói tudo que o Terraform gerencia. Key Pair não é gerenciado
+      # pelo Terraform (importado via AWS CLI no provision), então sobrevive.
       - name: Terraform destroy
         if: steps.check.outputs.found == 'true'
         working-directory: terraform
@@ -92,10 +98,12 @@ jobs:
             echo ""
             echo "| Item | Status |"
             echo "|---|---|"
-            echo "| EC2 / VPC / SG | destruídos (se state encontrado) |"
+            echo "| VPC / subnet / IGW / SG / EC2 | destruídos |"
             echo "| Key Pair \`ci-cd-deploy-key\` | **mantido** |"
             echo "| Artifact \`terraform-state\` | **mantido** |"
             echo "| Secrets / Variables | **mantidos** |"
             echo ""
             echo "Para recriar: **CD - Provision Infra → Run workflow**"
+            echo ""
+            echo "Depois de recriar, atualize apenas a variable \`EC2_PUBLIC_IP\`."
           } >> $GITHUB_STEP_SUMMARY
