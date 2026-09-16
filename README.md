@@ -38,22 +38,52 @@ Settings > Branches		Regra para main com: Require PR + 1 approval
 
 # Estrutura:
 ```
-ci_cd/                                      # Raiz do repositório
+ci_cd/
+├── .github/
+│   ├── CODEOWNERS
+│   └── workflows/
+│       ├── ci.yml
+│       ├── _reusable-test.yml
+│       ├── cd-provision.yml
+│       ├── cd-rolling.yml
+│       ├── cd-blue-green.yml
+│       └── cd-blue-green-switch.yml
 │
-├── .github/                                # Pasta especial do GitHub
-│   ├── CODEOWNERS                          # Define quem revisa os PRs
-│   └── workflows/                          # Pasta onde ficam os pipelines
-│       ├── ci.yml                          # Pipeline principal (dispara em PR/push)
-│       └── _reusable-test.yml              # Workflow reutilizável (chamado pelo ci.yml)
+├── terraform/
+│   ├── providers.tf
+│   ├── variables.tf
+│   ├── main.tf
+│   ├── outputs.tf
+│   └── user_data.sh
 │
-├── docs/                                   # Pasta de documentação
-│   └── ci-pipeline.md                      # Documentação detalhada do pipeline
+├── ansible/
+│   ├── ansible.cfg
+│   ├── inventory.sh
+│   └── playbook.yml
 │
-├── README.md                               # Apresentação do projeto e checklist
-├── requirements.txt                        # Dependências de produção
-├── requirements-dev.txt                    # Dependências de desenvolvimento (testes, segurança)
-├── app.py                                  # Aplicação Flask
-└── test_app.py                             # Testes unitários da aplicação
+├── k8s/
+│   ├── rolling/
+│   │   ├── deployment.yaml
+│   │   ├── service.yaml
+│   │   └── ingress.yaml
+│   └── blue-green/
+│       ├── deployment-blue.yaml
+│       ├── deployment-green.yaml
+│       ├── service-blue.yaml
+│       ├── service-green.yaml
+│       ├── service-active.yaml
+│       └── ingress.yaml
+│
+├── docs/
+│   ├── ci-pipeline.md
+│   └── cd-pipeline.md
+│
+├── Dockerfile
+├── app.py
+├── requirements.txt
+├── requirements-dev.txt
+├── test_app.py
+└── README.md                     # Testes unitários da aplicação
 ```
 # CI/CD - Grupo dhuberto
 
