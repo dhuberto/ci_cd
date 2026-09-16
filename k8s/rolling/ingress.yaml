@@ -1,0 +1,22 @@
+# Ingress roteia host rolling.local → Service todolist.
+# curl -H "Host: rolling.local" http://<IP>/healthz usa este host.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: todolist
+  namespace: rolling
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: rolling.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: todolist
+                port:
+                  number: 5000
