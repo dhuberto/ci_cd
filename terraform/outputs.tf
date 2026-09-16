@@ -1,5 +1,5 @@
-# Outputs que o workflow consome via `terraform output -raw <nome>`
-# para alimentar jobs seguintes sem IP hardcoded.
+# Outputs consumidos pelo workflow via `terraform output -raw <nome>`.
+# Evita IP hardcoded nos workflows.
 
 output "instance_public_ip" {
   description = "IP público da EC2"
