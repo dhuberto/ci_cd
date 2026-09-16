@@ -1,0 +1,55 @@
+# Deployment do Rolling Update.
+# A imagem IMAGE_PLACEHOLDER é substituída pelo workflow a cada deploy,
+# o que permite rastrear exatamente qual commit está rodando.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todolist
+  namespace: rolling
+  labels:
+    app: todolist
+spec:
+  replicas: 3
+  # Estratégia RollingUpdate: sobe N pods novos antes de derrubar antigos.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: todolist
+  template:
+    metadata:
+      labels:
+        app: todolist
+    spec:
+      containers:
+        - name: app
+          image: IMAGE_PLACEHOLDER
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+          env:
+            - name: APP_NAME
+              value: "TodoList Rolling"
+            - name: APP_COLOR
+              value: "purple"
+            - name: APP_PORT
+              value: "5000"
+            - name: SESSION_KEY
+              value: "rolling-session-key"
+          # Probe de prontidão: só marca o pod como pronto se /healthz responde.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          # Probe de liveness: reinicia o pod se ele travar.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 10
