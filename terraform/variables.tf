@@ -1,5 +1,5 @@
-# Todas as variáveis do projeto. Os valores default são usados quando o workflow
-# não passa TF_VAR_<nome> explicitamente.
+# Variáveis do Terraform. Os defaults são usados quando o workflow não passa
+# TF_VAR_<nome> explicitamente.
 
 variable "aws_region" {
   description = "Região AWS"
@@ -7,7 +7,7 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-# kind exige pelo menos 2 vCPU / 4 GB. t3.medium atende com folga.
+# kind exige ao menos 2 vCPU / 4 GB. t3.medium atende com folga.
 variable "instance_type" {
   description = "Tipo da instância EC2"
   type        = string
@@ -20,7 +20,7 @@ variable "key_name" {
   type        = string
 }
 
-# CIDR com acesso a SSH (22) e à API do k8s (6443).
+# CIDR liberado para SSH (22) e API do k8s (6443).
 variable "allowed_cidr" {
   description = "CIDR liberado para SSH e API do k8s"
   type        = string
