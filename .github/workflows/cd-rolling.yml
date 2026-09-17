@@ -5,9 +5,10 @@
 #   1. Build + push da imagem para o GHCR
 #   2. SSH na EC2
 #   3. Cria imagePullSecret no namespace rolling (a imagem é privada)
-#   4. Aplica os manifestos (deployment + service + ingress)
-#   5. Aguarda rollout
-#   6. Smoke test via Ingress
+#   4. Aplica o rbac.yaml (ServiceAccount + Role + RoleBinding) — para a rota /pods
+#   5. Aplica os manifestos (deployment + service + ingress)
+#   6. Aguarda rollout
+#   7. Smoke test via Ingress
 #
 # Uso: Actions → CD - Rolling Update → Run workflow → image_tag: latest
 # =============================================================================
@@ -109,13 +110,16 @@ jobs:
                --docker-password=${{ secrets.GITHUB_TOKEN }} \
                --dry-run=client -o yaml | /usr/local/bin/kubectl apply -f -"
 
+      # Aplica o RBAC primeiro (ServiceAccount + Role + RoleBinding) para que a
+      # rota /pods do app tenha permissão de ler pods. Depois aplica o resto.
       # Caminho absoluto do kubectl: o SSH não-interativo não carrega
       # /etc/profile.d/, então 'kubectl' puro dá 'command not found'.
       - name: Aplicar e aguardar rollout
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ec2-user@${{ vars.EC2_PUBLIC_IP }} \
-            '/usr/local/bin/kubectl apply -f /home/ec2-user/rolling/ && \
+            '/usr/local/bin/kubectl apply -f /home/ec2-user/rolling/rbac.yaml && \
+             /usr/local/bin/kubectl apply -f /home/ec2-user/rolling/ && \
              /usr/local/bin/kubectl -n rolling rollout status deploy/todolist --timeout=180s'
 
       - name: Smoke test
