@@ -1,5 +1,12 @@
-# Slot BLUE. A cor (APP_COLOR=blue) é o que muda na interface ao vivo
-# quando o switch de tráfego aponta o Service ativo para este slot.
+# =============================================================================
+# deployment-blue.yaml — slot BLUE
+# =============================================================================
+# APP_COLOR=blue faz a interface ficar azul quando o slot está ativo.
+# labels slot=blue casam com o Service todolist-blue e com o selector
+# do Service todolist-active (durante o switch).
+#
+# serviceAccountName: todolist-sa — identidade para a rota /pods.
+# =============================================================================
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,6 +27,8 @@ spec:
         app: todolist
         slot: blue
     spec:
+      # ServiceAccount para a rota /pods consultar a API do k8s.
+      serviceAccountName: todolist-sa
       containers:
         - name: app
           image: IMAGE_PLACEHOLDER
