@@ -1,6 +1,13 @@
-# Deployment do Rolling Update.
-# A imagem IMAGE_PLACEHOLDER é substituída pelo workflow a cada deploy,
-# o que permite rastrear exatamente qual commit está rodando.
+# =============================================================================
+# deployment.yaml — Deployment do Rolling Update
+# =============================================================================
+# 3 réplicas com strategy RollingUpdate. A imagem IMAGE_PLACEHOLDER é
+# substituída pelo workflow a cada deploy.
+#
+# serviceAccountName: todolist-sa — o pod usa essa ServiceAccount para
+# falar com a API do k8s (rota /pods). A ServiceAccount e a Role são
+# criadas pelo rbac.yaml.
+# =============================================================================
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -10,7 +17,6 @@ metadata:
     app: todolist
 spec:
   replicas: 3
-  # Estratégia RollingUpdate: sobe N pods novos antes de derrubar antigos.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -24,6 +30,8 @@ spec:
       labels:
         app: todolist
     spec:
+      # ServiceAccount para a rota /pods consultar a API do k8s.
+      serviceAccountName: todolist-sa
       containers:
         - name: app
           image: IMAGE_PLACEHOLDER
@@ -39,14 +47,12 @@ spec:
               value: "5000"
             - name: SESSION_KEY
               value: "rolling-session-key"
-          # Probe de prontidão: só marca o pod como pronto se /healthz responde.
           readinessProbe:
             httpGet:
               path: /healthz
               port: 5000
             initialDelaySeconds: 5
             periodSeconds: 5
-          # Probe de liveness: reinicia o pod se ele travar.
           livenessProbe:
             httpGet:
               path: /healthz
