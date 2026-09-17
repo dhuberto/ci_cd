@@ -5,11 +5,10 @@
 #   1. Build + push da imagem para o GHCR
 #   2. SSH na EC2
 #   3. Cria imagePullSecret no namespace blue-green
-#   4. Aplica os Services (blue, green, active) + Ingress
-#   5. Aplica o deployment da cor alvo (blue ou green)
-#   6. Smoke test direto no pod da cor (sem mexer no tráfego)
-#
-# O switch de tráfego é feito por outro workflow: cd-blue-green-switch.yml.
+#   4. Aplica o rbac.yaml (ServiceAccount + Role + RoleBinding)
+#   5. Aplica os Services + Ingress
+#   6. Aplica o deployment da cor alvo
+#   7. Smoke test direto no pod da cor
 #
 # Uso: Actions → CD - Blue/Green (deploy por cor) → Run workflow
 # =============================================================================
@@ -90,28 +89,22 @@ jobs:
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
 
-      # Renderiza o deployment da cor alvo substituindo IMAGE_PLACEHOLDER.
       - name: Renderizar deployment da cor alvo
         run: |
           sed -i "s|IMAGE_PLACEHOLDER|${{ env.IMAGE_NAME }}|g" \
             k8s/blue-green/deployment-${{ inputs.color }}.yaml
 
-      # Copia os manifestos base (services + ingress) para a EC2.
-      - name: Copiar manifestos base
+      # Copia o rbac.yaml + os manifestos base + o deployment da cor.
+      - name: Copiar manifestos base e o da cor
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ec2-user@${{ vars.EC2_PUBLIC_IP }} "mkdir -p ~/blue-green"
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            k8s/blue-green/rbac.yaml \
             k8s/blue-green/service-blue.yaml \
             k8s/blue-green/service-green.yaml \
             k8s/blue-green/service-active.yaml \
             k8s/blue-green/ingress.yaml \
-            ec2-user@${{ vars.EC2_PUBLIC_IP }}:/home/ec2-user/blue-green/
-
-      # Copia o deployment da cor alvo.
-      - name: Copiar deployment da cor alvo
-        run: |
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             k8s/blue-green/deployment-${{ inputs.color }}.yaml \
             ec2-user@${{ vars.EC2_PUBLIC_IP }}:/home/ec2-user/blue-green/
 
@@ -126,19 +119,20 @@ jobs:
                --docker-password=${{ secrets.GITHUB_TOKEN }} \
                --dry-run=client -o yaml | /usr/local/bin/kubectl apply -f -"
 
-      # Aplica services e ingress primeiro, depois o deployment da cor.
+      # Aplica rbac primeiro (SA), depois services + ingress, depois o deployment.
+      # A ordem importa: o deployment referencia a ServiceAccount `todolist-sa`.
       - name: Aplicar base + deployment da cor
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ec2-user@${{ vars.EC2_PUBLIC_IP }} \
-            '/usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/service-blue.yaml && \
+            '/usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/rbac.yaml && \
+             /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/service-blue.yaml && \
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/service-green.yaml && \
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/service-active.yaml && \
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/ingress.yaml && \
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/deployment-${{ inputs.color }}.yaml && \
              /usr/local/bin/kubectl -n blue-green rollout status deploy/todolist-${{ inputs.color }} --timeout=180s'
 
-      # Smoke test direto no pod da cor alvo (sem tocar no tráfego ativo).
       - name: Smoke test no slot
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
@@ -146,13 +140,3 @@ jobs:
             '/usr/local/bin/kubectl -n blue-green run smoke-${{ inputs.color }} \
                --rm -i --restart=Never --image=curlimages/curl -- \
                curl -sf http://todolist-${{ inputs.color }}:5000/healthz'
-
-      - name: Resumo
-        run: |
-          {
-            echo "### Deploy na cor \`${{ inputs.color }}\` concluído"
-            echo ""
-            echo "- Imagem: \`${{ env.IMAGE_NAME }}\`"
-            echo "- O tráfego AINDA NÃO foi alterado."
-            echo "- Para ativar: rode **CD - Blue/Green (switch de tráfego)** com a mesma cor."
-          } >> $GITHUB_STEP_SUMMARY
