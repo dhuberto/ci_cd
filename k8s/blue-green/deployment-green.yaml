@@ -1,4 +1,12 @@
-# Slot GREEN. Idêntico ao BLUE exceto por APP_COLOR=green e labels slot=green.
+# =============================================================================
+# deployment-green.yaml — slot GREEN
+# =============================================================================
+# APP_COLOR=green faz a interface ficar verde quando o slot está ativo.
+# labels slot=green casam com o Service todolist-green e com o selector
+# do Service todolist-active (durante o switch).
+#
+# serviceAccountName: todolist-sa — identidade para a rota /pods.
+# =============================================================================
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,6 +27,8 @@ spec:
         app: todolist
         slot: green
     spec:
+      # ServiceAccount para a rota /pods consultar a API do k8s.
+      serviceAccountName: todolist-sa
       containers:
         - name: app
           image: IMAGE_PLACEHOLDER
