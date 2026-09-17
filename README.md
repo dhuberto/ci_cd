@@ -282,6 +282,17 @@ Actions → CD - Destroy Full → Run workflow
 
 ---
 
+## acessando o ambiente
+
+Acessa via ssh
+```
+ssh -i ~\.ssh\deploy_key ec2-user@<IP_DA_EC2>
+```
+Comando para mostrar os 3 pods todolist* em Running Dentro da EC2:
+```
+/usr/local/bin/kubectl -n rolling get pods -o wide
+```
+
 ## Como rodar localmente
 
 ### Pré-requisitos
