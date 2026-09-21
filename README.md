@@ -3,9 +3,9 @@
 [![CI](https://github.com/dhuberto/ci_cd/actions/workflows/ci.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/ci.yml)
 
 Repositório da disciplina **Pipelines de Entrega Contínua (CI/CD) e
-Automação de Deployments**. Contém a aplicação, os pipelines de CI e
-CD, a infraestrutura como código (Terraform) e a configuração da EC2
-(Ansible).
+Automação de Deployments**. Contém a aplicação (Go + Postgres), os
+pipelines de CI e CD, a infraestrutura como código (Terraform) e a
+configuração da EC2 (Ansible).
 
 **Membros:**
 
@@ -20,6 +20,7 @@ CD, a infraestrutura como código (Terraform) e a configuração da EC2
 - [Pipeline de CI (Atividade 1)](#pipeline-de-ci-atividade-1)
 - [Pipeline de CD (Atividade 2)](#pipeline-de-cd-atividade-2)
 - [Como fazer rollback](#como-fazer-rollback)
+- [Acessando o ambiente](#acessando-o-ambiente)
 - [Como rodar localmente](#como-rodar-localmente)
 - [Estrutura do repositório](#estrutura-do-repositório)
 - [Checklists das atividades](#checklists-das-atividades)
@@ -30,14 +31,20 @@ CD, a infraestrutura como código (Terraform) e a configuração da EC2
 
 A esteira cobre dois ciclos:
 
-- **CI** — valida cada PR com testes, auditoria de dependências e
-  análise estática (matrix Python + cache + reusable workflow).
+- **CI** — valida cada PR com testes (`go test`), análise estática
+  (`go vet`) e auditoria de dependências (`govulncheck`) em matrix
+  Go 1.22 / 1.23, além de scan de segurança com Trivy.
 - **CD** — provisiona a infraestrutura na AWS via Terraform, configura
   o cluster `kind` na EC2 via Ansible, e faz deploy com duas
   estratégias: **Rolling Update** e **Blue/Green**.
 
 A imagem da aplicação é publicada no **GHCR**
 (`ghcr.io/dhuberto/ci_cd:<sha>`).
+
+**Aplicação:** todo-list em Go + PostgreSQL com renderização no servidor
+(SSR). O binário é estático (`CGO_ENABLED=0`), a imagem final tem cerca
+de ~20 MB e o driver Postgres é compilado dentro do binário — zero
+dependências em runtime.
 
 ---
 
@@ -63,14 +70,18 @@ GitHub Actions (runner hospedado)
 EC2 Amazon Linux 2023
  └── cluster kind "devops-labs"
        ├── namespace: rolling
-       │     ├── Deployment todolist (3 réplicas, APP_COLOR=purple)
-       │     ├── Service ClusterIP todolist
+       │     ├── StatefulSet postgres   (1 réplica, PVC 1Gi, postgres:alpine)
+       │     ├── Service postgres       (headless, para DNS estável)
+       │     ├── Deployment todolist    (3 réplicas, APP_COLOR=purple)
+       │     ├── Service todolist       (ClusterIP)
        │     └── Ingress rolling.local
        │
        └── namespace: blue-green
-             ├── Deployment todolist-blue  (2 réplicas, APP_COLOR=blue)
-             ├── Deployment todolist-green (2 réplicas, APP_COLOR=green)
-             ├── Service todolist-active   (selector trocável)
+             ├── StatefulSet postgres       (1 réplica, PVC 1Gi)
+             ├── Service postgres           (headless)
+             ├── Deployment todolist-blue   (2 réplicas, APP_COLOR=blue)
+             ├── Deployment todolist-green  (2 réplicas, APP_COLOR=green)
+             ├── Service todolist-active    (selector trocável)
              └── Ingress todolist.local
 ```
 
@@ -82,6 +93,8 @@ EC2 Amazon Linux 2023
 | Configuração da EC2 | Ansible | Docker, kind, kubectl, ingress-nginx |
 | Cluster | kind | Kubernetes local dentro de Docker |
 | Ingress | ingress-nginx | Ponto único de entrada HTTP |
+| Banco de dados | Postgres (StatefulSet + PVC) | Persistência real (1Gi por namespace) |
+| Aplicação | Go + `database/sql` + `lib/pq` | SSR, binário estático, sem runtime deps |
 | Registry | GHCR | Imagem `ghcr.io/dhuberto/ci_cd:<sha>` |
 | Deploy | kubectl via SSH | Aplica manifestos no cluster |
 | Rollback | `kubectl patch` no Service | Troca o selector ativo (Blue/Green) |
@@ -96,20 +109,21 @@ EC2 Amazon Linux 2023
 
 **O que roda:**
 
-1. **Lint** com `ruff`
-2. **Testes** com `pytest` em matrix Python 3.10 / 3.11 / 3.12
-3. **Auditoria de dependências** com `pip-audit` (bloqueia o PR se achar CVE)
-4. **Scan de imagem** com Trivy (via reusable workflow)
+1. **Análise estática** com `go vet`
+2. **Testes** com `go test` em matrix Go 1.22 / 1.23
+3. **Auditoria de dependências** com `govulncheck` (bloqueia o PR se achar CVE)
+4. **Scan de imagem** com Trivy (filesystem + image)
 
 **Features de destaque:**
 
 - **Reusable workflow** (`_reusable-test.yml`) extrai os steps de
   teste, evitando duplicação entre jobs.
-- **Cache de dependências** (pip) — segundo run é ~3x mais rápido.
+- **Cache de módulos Go** (`go.sum`) — segundo run é ~3x mais rápido.
 - **`permissions:` mínimo** — `contents: read` por padrão; jobs que
   precisam de mais pedem explicitamente.
-- **Branch protection** — required checks (`Test (Python 3.10/3.11/3.12)`,
-  `Dependency audit`) bloqueiam o merge se qualquer um falhar.
+- **Branch protection** — required checks (`Test (Go 1.22)`,
+  `Test (Go 1.23)`, `Dependency audit`) bloqueiam o merge se qualquer
+  um falhar.
 - **CODEOWNERS** — revisores atribuídos automaticamente por arquivo.
 
 ### Como disparar o CI
@@ -160,8 +174,10 @@ Actions → CD - Rolling Update → Run workflow
 **O que faz:**
 
 - Build + push da imagem para o GHCR
-- Aplica manifestos no namespace `rolling`
-- Aguarda rollout dos 3 pods
+- Aplica o Postgres (Secret + Service + StatefulSet) no namespace `rolling`
+- Aguarda o rollout do Postgres
+- Aplica o RBAC + a aplicação (Deployment + Service + Ingress)
+- Aguarda o rollout dos 3 pods
 - Smoke test via Ingress (`http://rolling.local/healthz`)
 
 **Como acessar:**
@@ -187,6 +203,7 @@ Actions → CD - Blue/Green (deploy por cor) → Run workflow
 **O que faz:**
 
 - Build + push da imagem
+- Aplica o Postgres do namespace `blue-green` (Secret + Service + StatefulSet)
 - Aplica os Services (`todolist-blue`, `todolist-green`,
   `todolist-active`), o Ingress e o Deployment `todolist-blue`
 - Smoke test direto no pod do slot blue
@@ -282,78 +299,103 @@ Actions → CD - Destroy Full → Run workflow
 
 ---
 
-## acessando o ambiente
+## Acessando o ambiente
 
-Acessa via ssh
+Acessa via SSH:
+
+```bash
+ssh -i ~/.ssh/deploy_key ec2-user@<IP_DA_EC2>
 ```
-ssh -i ~\.ssh\deploy_key ec2-user@<IP_DA_EC2>
-```
-Comando para mostrar os 3 pods todolist* em Running Dentro da EC2:
-```
+
+Comandos úteis dentro da EC2:
+
+```bash
+# Pods da aplicação no rolling
 /usr/local/bin/kubectl -n rolling get pods -o wide
+
+# Postgres no rolling
+/usr/local/bin/kubectl -n rolling get statefulset,pvc
+
+# Pods no blue-green
+/usr/local/bin/kubectl -n blue-green get pods -o wide
+
+# Qual cor está ativa agora
+/usr/local/bin/kubectl -n blue-green get svc todolist-active -o jsonpath='{.spec.selector}'
 ```
+
+---
 
 ## Como rodar localmente
 
 ### Pré-requisitos
 
-- Python 3.10+
-- git
+- **Go 1.22+** instalado (`go version`)
+- **Docker** + **Docker Compose** (para a stack completa com Postgres)
+- **git**
 
-### Subir a aplicação
+### Rodar os testes
 
 ```bash
-# Clonar
-git clone https://github.com/dhuberto/ci_cd.git
-cd ci_cd
-
-# Ambiente virtual
-python3 -m venv venv
-
-# Ativar (Linux/Mac)
-source venv/bin/activate
-
-# Ativar (Windows PowerShell)
-.\venv\Scripts\Activate.ps1
-
-# Instalar dependências
-pip install -r requirements.txt -r requirements-dev.txt
-
-# Rodar o servidor
-python app.py -v
+go mod tidy
+go test ./...
+go vet ./...
 ```
 
-**Rotas para testar:**
+### Rodar direto (sem Docker)
 
-| Rota | Resposta esperada |
-|---|---|
-| `http://localhost:5000/` | Página da todo-list |
-| `http://localhost:5000/healthz` | `ok` |
-
-### Rodar os checks do CI localmente
+Precisa de um Postgres acessível e das envs `DB_*` exportadas:
 
 ```bash
-# Testes
-pytest -v
+export DB_HOST=localhost
+export DB_PORT=5432
+export DB_USER=appuser
+export DB_PASSWORD=mudar123
+export DB_NAME=appdb
+export APP_PORT=5000
+export APP_COLOR=purple
 
-# Lint
-ruff check .
-
-# Auditoria de dependências
-pip-audit -r requirements.txt -r requirements-dev.txt
+go run ./src
 ```
 
 ### Rodar com Docker
 
 ```bash
-docker build -t todolist:dev .
+# Build da imagem
+docker build -t app-go:dev .
+
+# Rodar (precisa de um Postgres acessível)
 docker run --rm -p 8080:5000 \
-  -e APP_COLOR=blue \
-  -e SESSION_KEY=local \
-  todolist:dev
+  -e DB_HOST=host.docker.internal \
+  -e DB_PORT=5432 \
+  -e DB_USER=appuser \
+  -e DB_PASSWORD=mudar123 \
+  -e DB_NAME=appdb \
+  -e APP_COLOR=purple \
+  app-go:dev
 ```
 
 Acesse `http://localhost:8080/`.
+
+**Rotas para testar:**
+
+| Rota | Resposta esperada |
+|---|---|
+| `http://localhost:8080/` | Página da todo-list |
+| `http://localhost:8080/healthz` | `ok` |
+
+### Rodar os checks do CI localmente
+
+```bash
+# Análise estática
+go vet ./...
+
+# Testes
+go test -v ./...
+
+# Auditoria de dependências (precisa instalar govulncheck)
+go install golang.org/x/vuln/cmd/govulncheck@latest
+govulncheck ./...
+```
 
 ---
 
@@ -364,50 +406,59 @@ ci_cd/
 ├── .github/
 │   ├── CODEOWNERS                          # Define quem revisa PRs (dono por arquivo/pasta)
 │   └── workflows/
-│       ├── ci.yml                          # CI: lint, pytest, pip-audit, Trivy em PR/push
+│       ├── ci.yml                          # CI: go vet, go test, govulncheck, Trivy
 │       ├── _reusable-test.yml              # Workflow reutilizável (workflow_call) com steps de teste
 │       ├── cd-provision.yml                # Provisiona AWS (Terraform) + configura kind/ingress (Ansible)
-│       ├── cd-rolling.yml                  # Build+push da imagem e deploy Rolling no namespace rolling
-│       ├── cd-blue-green.yml               # Build+push e deploy no slot blue ou green (cor inativa)
-│       ├── cd-blue-green-switch.yml        # Faz o cutover: patch do Service active (switch e rollback)
-│       ├── cd-destroy.yml                  # Teardown parcial: destrói infra, mantém Key Pair e state
-│       └── cd-destroy-full.yml             # Teardown total: destrói infra, Key Pair, state e órfãos
+│       ├── cd-rolling.yml                  # Build+push e deploy Rolling (com Postgres)
+│       ├── cd-blue-green.yml               # Build+push e deploy no slot blue ou green
+│       ├── cd-blue-green-switch.yml        # Patch do Service active (switch e rollback)
+│       ├── cd-destroy.yml                  # Teardown parcial
+│       └── cd-destroy-full.yml             # Teardown total
 │
 ├── terraform/                              # IaC da AWS (VPC, subnet, IGW, SG, EC2)
-│   ├── providers.tf                        # Declara provider AWS e versão do Terraform (state local)
-│   ├── variables.tf                        # Variáveis: região, tipo, key_name, CIDR, tamanho do disco
-│   ├── main.tf                             # Recursos AWS: VPC, subnet, IGW, route table, SG e EC2
-│   ├── outputs.tf                          # Outputs consumidos pelo workflow: IP público, ID, URL
-│   └── user_data.sh                        # Script de bootstrap da EC2 (Docker + grupo docker)
+│   ├── providers.tf                        # Provider AWS + versão do Terraform
+│   ├── variables.tf                        # Variáveis: região, tipo, key_name, CIDR, disco
+│   ├── main.tf                             # Recursos AWS
+│   ├── outputs.tf                          # Outputs consumidos pelo workflow
+│   └── user_data.sh                        # Bootstrap da EC2 (Docker)
 │
 ├── ansible/                                # Configuração da EC2 após o provision
-│   ├── ansible.cfg                         # Configuração global: usuário, chave SSH, host key check
-│   └── playbook.yml                        # Instala kind, kubectl, ingress-nginx e cria namespaces
+│   ├── ansible.cfg                         # Configuração global
+│   └── playbook.yml                        # kind, kubectl, ingress-nginx, namespaces
 │
 ├── k8s/                                    # Manifestos Kubernetes
 │   ├── rolling/
+│   │   ├── postgres-secret.yaml            # Credenciais do Postgres
+│   │   ├── postgres-service.yaml           # Service headless do StatefulSet
+│   │   ├── postgres-statefulset.yaml       # StatefulSet + PVC 1Gi
+│   │   ├── rbac.yaml                       # ServiceAccount + Role + RoleBinding
 │   │   ├── deployment.yaml                 # Deployment Rolling (3 réplicas, APP_COLOR=purple)
-│   │   ├── service.yaml                    # Service ClusterIP interno do namespace rolling
-│   │   └── ingress.yaml                    # Ingress que expõe rolling.local → Service todolist
+│   │   ├── service.yaml                    # Service ClusterIP
+│   │   └── ingress.yaml                    # Ingress rolling.local
 │   └── blue-green/
-│       ├── deployment-blue.yaml            # Deployment do slot blue (APP_COLOR=blue, labels slot=blue)
-│       ├── deployment-green.yaml           # Deployment do slot green (APP_COLOR=green, labels slot=green)
-│       ├── service-blue.yaml               # Service ClusterIP do slot blue (usado pelo smoke test)
-│       ├── service-green.yaml              # Service ClusterIP do slot green (usado pelo smoke test)
-│       ├── service-active.yaml             # Service ativo — o switch troca APENAS o selector dele
-│       └── ingress.yaml                    # Ingress aponta sempre para todolist-active em todolist.local
+│       ├── postgres-secret.yaml            # Credenciais do Postgres (namespace blue-green)
+│       ├── postgres-service.yaml           # Service headless
+│       ├── postgres-statefulset.yaml       # StatefulSet + PVC 1Gi
+│       ├── rbac.yaml                       # ServiceAccount + Role + RoleBinding
+│       ├── deployment-blue.yaml            # Slot blue (APP_COLOR=blue)
+│       ├── deployment-green.yaml           # Slot green (APP_COLOR=green)
+│       ├── service-blue.yaml               # ClusterIP do slot blue
+│       ├── service-green.yaml              # ClusterIP do slot green
+│       ├── service-active.yaml             # Service ativo (selector trocável)
+│       └── ingress.yaml                    # Ingress todolist.local
 │
 ├── docs/
-│   ├── ci-pipeline.md                      # Documentação detalhada do CI (gates, matrix, reusable)
-│   └── cd-pipeline.md                      # Documentação detalhada do CD (arquitetura, deploy, rollback)
+│   ├── ci-pipeline.md                      # Documentação detalhada do CI
+│   └── cd-pipeline.md                      # Documentação detalhada do CD
 │
-├── Dockerfile                              # Build da imagem da aplicação Flask usada nos deploys
-├── app.py                                  # Aplicação Flask (rotas / e /healthz usadas pelos gates)
-├── test_app.py                             # Testes unitários da aplicação (executados pelo pytest)
-├── requirements.txt                        # Dependências de produção (alvo do pip-audit e Trivy)
-├── requirements-dev.txt                    # Dependências de desenvolvimento (pytest, ruff, pip-audit)
-├── pyproject.toml                          # Configuração do ruff (lint) e metadados do projeto
-└── README.md                               # Documentação do grupo: arquitetura, comandos, rollback
+├── src/
+│   ├── main.go                             # Aplicação Go (HTTP + Postgres)
+│   └── main_test.go                        # Testes unitários dos handlers
+│
+├── go.mod                                  # Módulo Go e dependências
+├── go.sum                                  # Checksums das dependências
+├── Dockerfile                              # Build multi-stage (Go estático + Alpine)
+└── README.md                               # Documentação oficial
 ```
 
 ---
@@ -421,10 +472,10 @@ ci_cd/
 - [x] Branch `main` protegida com required status checks
 - [x] `CODEOWNERS` configurado
 - [x] `ci.yml` disparando em `pull_request` e `push` na `main`
-- [x] Testes automatizados com pytest
-- [x] Auditoria de dependências com `pip-audit`
-- [x] Matrix de Python (3.10, 3.11, 3.12)
-- [x] Cache de dependências (pip)
+- [x] Testes automatizados com `go test`
+- [x] Auditoria de dependências com `govulncheck`
+- [x] Matrix de Go (1.22, 1.23)
+- [x] Cache de módulos Go
 - [x] Reusable workflow (`_reusable-test.yml`)
 - [x] `permissions:` explícito e mínimo
 - [x] Badge do pipeline no README
@@ -436,6 +487,7 @@ ci_cd/
 - [x] Imagem publicada no GHCR com tag do commit
 - [x] Cluster kind + ingress-nginx acessível pelo Actions
 - [x] Manifestos com Deployment, Service ClusterIP e Ingress
+- [x] Postgres com StatefulSet + PVC (persistência real)
 - [x] `cd-rolling.yml` com `scp` + `kubectl apply` + `rollout status` + smoke test
 - [x] `cd-blue-green.yml` (deploy por cor) + `cd-blue-green-switch.yml` (cutover)
 - [x] Rollback do Blue/Green demonstrado (re-switch de tráfego)
@@ -455,6 +507,11 @@ ci_cd/
   repositório, versionada e idempotente.
 - **Um Environment `aws`** (não `dev`/`prod`): a Atividade 2 pede as
   duas estratégias no mesmo cluster, não dois ambientes isolados.
+- **Go em vez de Python:** binário estático de ~20 MB, zero dependências
+  em runtime, `govulncheck` como gate de segurança. A imagem final caiu
+  de ~180 MB para ~20 MB.
+- **Postgres como StatefulSet + PVC:** persistência real com 1Gi por
+  namespace. O StorageClass `local-path` do kind já provisiona o volume.
 - **GHCR em vez de Docker Hub:** autenticação nativa via `GITHUB_TOKEN`
   e sem rate limit.
 - **Blue/Green com `APP_COLOR`:** torna o switch visualmente verificável
@@ -466,4 +523,6 @@ ci_cd/
 
 - [`docs/ci-pipeline.md`](docs/ci-pipeline.md) — documentação detalhada do CI
 - [`docs/cd-pipeline.md`](docs/cd-pipeline.md) — documentação detalhada do CD
+- [`src/main.go`](src/main.go) — código da aplicação (Go)
+- [`src/main_test.go`](src/main_test.go) — testes unitários
 - Rubrica da Atividade 1 e 2 (fornecidas pelo professor)
