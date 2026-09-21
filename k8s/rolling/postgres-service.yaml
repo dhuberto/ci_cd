@@ -1,0 +1,21 @@
+# =============================================================================
+# postgres-service.yaml — Service headless do Postgres
+# =============================================================================
+# clusterIP: None porque o StatefulSet precisa de um Service headless
+# para DNS estável (postgres-0.postgres.rolling.svc.cluster.local).
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: rolling
+  labels:
+    app: postgres
+spec:
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
