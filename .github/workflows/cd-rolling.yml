@@ -2,10 +2,10 @@
 # CD - Rolling Update
 # =============================================================================
 # Fluxo:
-#   1. Build + push da imagem para o GHCR
+#   1. Build + push da imagem para o GHCR (gera go.sum antes)
 #   2. SSH na EC2
-#   3. Aplica Postgres (Secret + Service + StatefulSet) no namespace rolling
-#   4. Aplica app (Deployment + Service + Ingress)
+#   3. Aplica Postgres (Secret + Service + StatefulSet)
+#   4. Aplica app (RBAC + Deployment + Service + Ingress)
 #   5. Smoke test via Ingress
 # =============================================================================
 name: CD - Rolling Update
@@ -38,6 +38,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+
+      # Gera go.sum antes do build.
+      - name: Preparar módulo Go (go mod tidy)
+        run: |
+          if [ ! -f go.mod ]; then
+            cat > go.mod <<'EOF'
+          module app-go
+
+          go 1.22
+
+          require github.com/lib/pq v1.10.9
+          EOF
+          fi
+          go mod tidy
 
       - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
@@ -102,8 +122,6 @@ jobs:
                --docker-password=${{ secrets.GITHUB_TOKEN }} \
                --dry-run=client -o yaml | /usr/local/bin/kubectl apply -f -"
 
-      # Aplica Postgres primeiro (Secret + Service + StatefulSet), espera
-      # o rollout, e só depois aplica a app. Senão a app sobe antes do banco.
       - name: Aplicar Postgres
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
@@ -113,7 +131,6 @@ jobs:
              /usr/local/bin/kubectl apply -f /home/ec2-user/rolling/postgres-statefulset.yaml && \
              /usr/local/bin/kubectl -n rolling rollout status statefulset/postgres --timeout=180s'
 
-      # Aplica RBAC (ServiceAccount + Role) e depois o restante dos manifestos
       - name: Aplicar app + RBAC
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
