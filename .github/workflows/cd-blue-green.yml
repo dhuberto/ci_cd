@@ -2,7 +2,7 @@
 # CD - Blue/Green (deploy por cor)
 # =============================================================================
 # Fluxo:
-#   1. Build + push da imagem
+#   1. Build + push da imagem (gera go.sum antes)
 #   2. SSH na EC2
 #   3. Aplica Postgres do blue-green (Secret + Service + StatefulSet)
 #   4. Aplica Services + Ingress + RBAC
@@ -44,6 +44,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+
+      - name: Preparar módulo Go (go mod tidy)
+        run: |
+          if [ ! -f go.mod ]; then
+            cat > go.mod <<'EOF'
+          module app-go
+
+          go 1.22
+
+          require github.com/lib/pq v1.10.9
+          EOF
+          fi
+          go mod tidy
 
       - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
@@ -117,7 +136,6 @@ jobs:
                --docker-password=${{ secrets.GITHUB_TOKEN }} \
                --dry-run=client -o yaml | /usr/local/bin/kubectl apply -f -"
 
-      # Aplica Postgres do blue-green primeiro
       - name: Aplicar Postgres do blue-green
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
