@@ -2,7 +2,7 @@
 # _reusable-test.yml — workflow reutilizável de testes
 # =============================================================================
 # Chamado por outros workflows via `uses:`. Não dispara sozinho.
-# Roda go vet + go test em matrix Go (default: 1.22 e 1.23).
+# Gera go.sum se necessário, roda go vet + go test em matrix Go.
 # =============================================================================
 name: Reusable test
 
@@ -31,8 +31,21 @@ jobs:
         uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
         with:
           go-version: ${{ matrix.go-version }}
-          cache: true
-          cache-dependency-path: go.sum
+          cache: false
+
+      # Gera go.sum se necessário antes de rodar vet/test.
+      - name: Preparar módulo Go (go mod tidy)
+        run: |
+          if [ ! -f go.mod ]; then
+            cat > go.mod <<'EOF'
+          module app-go
+
+          go 1.22
+
+          require github.com/lib/pq v1.10.9
+          EOF
+          fi
+          go mod tidy
 
       - name: go vet
         run: go vet ./...
