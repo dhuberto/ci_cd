@@ -3,12 +3,13 @@
 # =============================================================================
 # Multi-stage: builder Go estático + Alpine final. Imagem ~20 MB.
 #
+# Builder com golang:1.25-alpine para corrigir CVEs do stdlib do Go.
 # O go.sum é gerado pelo workflow (go mod tidy) antes do docker build.
 # Se não existir, o builder roda go mod tidy dentro do container.
 # =============================================================================
 
 # ---------- Stage 1: builder ----------
-FROM golang:alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /build
 
