@@ -2,10 +2,10 @@ name: CI
 
 # Gatilhos: push na main, PR para main e execucao manual
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+ # push:
+    #branches: [main]
+ # pull_request:
+    #branches: [main]
   workflow_dispatch:
 
 # Permissoes minimas: leitura do codigo (jobs especificos pedem mais)
