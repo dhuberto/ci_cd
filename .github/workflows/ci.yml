@@ -2,15 +2,15 @@
 # CI — Integração Contínua (Go)
 # =============================================================================
 # Fluxo:
-#   1. Lint + Test em matrix Go 1.25
-#   2. Security (govulncheck)
+#   1. Lint + Test em matrix Go 1.25 (gera go.sum antes)
+#   2. Security (govulncheck) — gera go.sum antes
 #   3. Trivy (filesystem)
 #   4. Build (docker build) + Trivy (image)      — condicional
-#   5. Publish (push no GHCR)                    — condicional
+#   5. Publish (build + push no GHCR)            — condicional
 #   6. Notify — webhook para o canal do time
 #
-# O go.sum é gerado DENTRO do Dockerfile (go mod tidy) se não existir.
-# Não é necessário commitar go.mod/go.sum no repositório.
+# O go.sum é gerado em cada job que roda Go direto no runner (test, security).
+# O Dockerfile também gera o go.sum se não existir.
 #
 # Quando os jobs de build/publish rodam:
 #   - Em push na main (automático)
@@ -19,10 +19,10 @@
 name: CI
 
 on:
-  #push:
-    #branches: [main]
-  #pull_request:
-    #branches: [main]
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       run_build:
@@ -61,6 +61,26 @@ jobs:
         uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
         with:
           go-version: ${{ matrix.go-version }}
+          cache: false
+
+      # Gera o go.sum ANTES do vet/test. Sem isso, o Go reclama de
+      # "missing go.sum entry" ao importar github.com/lib/pq.
+      - name: Preparar módulo Go (go mod tidy)
+        run: |
+          if [ ! -f go.mod ]; then
+            printf '%s\n' \
+              'module app-go' \
+              '' \
+              'go 1.25' \
+              '' \
+              'require github.com/lib/pq v1.10.9' \
+              > go.mod
+          fi
+          go mod tidy
+          echo "=== go.mod ==="
+          cat go.mod
+          echo "=== go.sum ==="
+          cat go.sum
 
       - name: go vet
         run: go vet ./...
@@ -83,6 +103,21 @@ jobs:
         uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
         with:
           go-version: ${{ env.GO_DEFAULT }}
+          cache: false
+
+      # Gera o go.sum ANTES do govulncheck.
+      - name: Preparar módulo Go (go mod tidy)
+        run: |
+          if [ ! -f go.mod ]; then
+            printf '%s\n' \
+              'module app-go' \
+              '' \
+              'go 1.25' \
+              '' \
+              'require github.com/lib/pq v1.10.9' \
+              > go.mod
+          fi
+          go mod tidy
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -131,10 +166,6 @@ jobs:
   # ---------------------------------------------------------------------------
   # Build — docker build (sem push)
   # ---------------------------------------------------------------------------
-  # Roda em:
-  #   - push na main (automático)
-  #   - workflow_dispatch com run_build = true
-  # ---------------------------------------------------------------------------
   build:
     name: Build image
     needs: [test, security]
@@ -159,6 +190,7 @@ jobs:
           repo="ghcr.io/$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')/$IMAGE_NAME"
           echo "repo=$repo" >> "$GITHUB_OUTPUT"
 
+      # O Dockerfile gera o go.sum se não existir (via `go mod tidy`).
       - name: Build Docker image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.10.0
         with:
@@ -227,43 +259,61 @@ jobs:
           path: trivy-results.sarif
 
   # ---------------------------------------------------------------------------
-  # Publish — push no GHCR
+  # Publish — build + push no GHCR
   # ---------------------------------------------------------------------------
   publish:
     name: Publish image to GHCR
-    needs: [test, security, trivy, build, trivy_image]
+    needs: [test, security, trivy]
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && inputs.run_build == true)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment: production
     permissions:
       contents: read
       packages: write
     steps:
-      - name: Download image artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: docker-image
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Load image
-        run: docker load -i image.tar
+      - name: Resolve image reference
+        id: image
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          repo="ghcr.io/$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')/$IMAGE_NAME"
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
 
-      - name: Tag image as latest
-        run: docker tag "${{ needs.build.outputs.repo }}:${{ github.sha }}" "${{ needs.build.outputs.repo }}:latest"
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.3.0
+      - name: Login GHCR
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push image
+      - name: Build & Push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.10.0
+        with:
+          context: .
+          push: true
+          build-args: |
+            IMAGE_TAGS=${{ steps.image.outputs.repo }}:${{ github.sha }}
+          tags: |
+            ${{ steps.image.outputs.repo }}:${{ github.sha }}
+            ${{ steps.image.outputs.repo }}:latest
+
+      - name: Resumo
         run: |
-          docker push "${{ needs.build.outputs.repo }}:${{ github.sha }}"
-          docker push "${{ needs.build.outputs.repo }}:latest"
+          {
+            echo "### Imagem publicada"
+            echo ""
+            echo "- Repo: \`${{ steps.image.outputs.repo }}\`"
+            echo "- Tag: \`${{ github.sha }}\`"
+            echo "- Latest: \`latest\`"
+          } >> $GITHUB_STEP_SUMMARY
 
   # ---------------------------------------------------------------------------
   # Notify — webhook para o canal do time
