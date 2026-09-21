@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/dhuberto/ci_cd/actions/workflows/ci.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/ci.yml)
 
-Repositório da disciplina **Pipelines de Entrega Contínua (CI/CD) e
+Repositório **Pipelines de Entrega Contínua (CI/CD) e
 Automação de Deployments**. Contém a aplicação (Go + Postgres), os
 pipelines de CI e CD, a infraestrutura como código (Terraform) e a
 configuração da EC2 (Ansible).
