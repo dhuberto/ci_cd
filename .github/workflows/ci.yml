@@ -1,80 +1,91 @@
+# =============================================================================
+# CI — Integração Contínua (Go)
+# =============================================================================
+# Fluxo:
+#   1. Lint (go vet) + Test (go test) em matrix Go 1.22/1.23
+#   2. Security (govulncheck) — vulnerabilidades nas dependências
+#   3. Trivy (filesystem) — scan do código
+#   4. Build (docker build, sem push) + Trivy (image)
+#   5. Publish (push no GHCR) — só em push na main
+#   6. Notify — webhook para o canal do time
+#
+# Gatilhos: push na main, PR para main, workflow_dispatch
+# =============================================================================
 name: CI
 
-# Gatilhos: push na main, PR para main e execucao manual
 on:
- # push:
+  #push:
     #branches: [main]
- # pull_request:
+  #pull_request:
     #branches: [main]
   workflow_dispatch:
 
-# Permissoes minimas: leitura do codigo (jobs especificos pedem mais)
 permissions:
   contents: read
 
-# Concorrencia: cancela runs antigos do mesmo branch/workflow
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Variaveis globais reutilizadas pelos jobs
 env:
-  IMAGE_NAME: app-k8s-todolist
-  PYTHON_DEFAULT: '3.12'
+  IMAGE_NAME: app-go
+  GO_DEFAULT: '1.22'
 
 jobs:
-  # Lint: analise estatica com ruff, falha rapido se o codigo estiver sujo
-  lint:
-    name: Lint (ruff)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: ${{ env.PYTHON_DEFAULT }}
-
-      - name: Install dev dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-
-      - name: Run ruff
-        run: ruff check .
-
-  # Testes: delega para o reusable, matrix 3.11/3.12/3.13
+  # ---------------------------------------------------------------------------
+  # Lint + Test — matrix Go
+  # ---------------------------------------------------------------------------
   test:
-    name: Test
-    uses: ./.github/workflows/_reusable-test.yml
-    with:
-      python-versions: '["3.11", "3.12", "3.13"]'
+    name: Test (Go ${{ matrix.go-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ['1.22', '1.23']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-  # Seguranca (deps): audita vulnerabilidades com pip-audit
+      - name: Setup Go
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -v ./...
+
+  # ---------------------------------------------------------------------------
+  # Segurança — govulncheck
+  # ---------------------------------------------------------------------------
   security:
-    name: Dependency audit (pip-audit)
+    name: Dependency audit (govulncheck)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - name: Setup Go
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
         with:
-          python-version: ${{ env.PYTHON_DEFAULT }}
+          go-version: ${{ env.GO_DEFAULT }}
+          cache: true
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
-      - name: Run pip-audit
-        run: pip-audit
+      - name: Run govulncheck
+        run: govulncheck ./...
 
-  # Seguranca (filesystem): Trivy escaneia o codigo, gera SARIF
+  # ---------------------------------------------------------------------------
+  # Segurança — Trivy (filesystem)
+  # ---------------------------------------------------------------------------
   trivy:
     name: Vulnerability scan (Trivy, filesystem)
     runs-on: ubuntu-24.04
@@ -84,7 +95,7 @@ jobs:
       security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Run Trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -110,10 +121,12 @@ jobs:
           name: trivy-fs-results
           path: trivy-results.sarif
 
-  # Build: constroi a imagem Docker (sem push) e salva como artefato
+  # ---------------------------------------------------------------------------
+  # Build — docker build (sem push)
+  # ---------------------------------------------------------------------------
   build:
     name: Build image
-    needs: [lint, test, security]
+    needs: [test, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -123,9 +136,8 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      # Resolve o nome da imagem: ghcr.io/<owner>/<IMAGE_NAME>
       - name: Resolve image reference
         id: image
         env:
@@ -135,7 +147,7 @@ jobs:
           echo "repo=$repo" >> "$GITHUB_OUTPUT"
 
       - name: Build Docker image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.10.0
         with:
           context: .
           push: false
@@ -154,7 +166,9 @@ jobs:
           path: image.tar
           retention-days: 1
 
-  # Seguranca (imagem): Trivy escaneia a imagem construida
+  # ---------------------------------------------------------------------------
+  # Segurança — Trivy (image)
+  # ---------------------------------------------------------------------------
   trivy_image:
     name: Vulnerability scan (Trivy, image)
     needs: build
@@ -166,7 +180,7 @@ jobs:
       security-events: write
     steps:
       - name: Download image artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: docker-image
 
@@ -197,10 +211,12 @@ jobs:
           name: trivy-image-results
           path: trivy-results.sarif
 
-  # Publish: envia a imagem para o GHCR apos todos os gates passarem
+  # ---------------------------------------------------------------------------
+  # Publish — push no GHCR (só em push na main)
+  # ---------------------------------------------------------------------------
   publish:
     name: Publish image to GHCR
-    needs: [lint, test, security, trivy, build, trivy_image]
+    needs: [test, security, trivy, build, trivy_image]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -210,7 +226,7 @@ jobs:
       packages: write
     steps:
       - name: Download image artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: docker-image
 
@@ -220,9 +236,8 @@ jobs:
       - name: Tag image as latest
         run: docker tag "${{ needs.build.outputs.repo }}:${{ github.sha }}" "${{ needs.build.outputs.repo }}:latest"
 
-      # Login no GHCR com o GITHUB_TOKEN automatico
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.3.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -233,22 +248,22 @@ jobs:
           docker push "${{ needs.build.outputs.repo }}:${{ github.sha }}"
           docker push "${{ needs.build.outputs.repo }}:latest"
 
-  # Notify: envia o resultado do pipeline para o webhook (Discord/Slack)
+  # ---------------------------------------------------------------------------
+  # Notify — webhook para o canal do time
+  # ---------------------------------------------------------------------------
   notify:
     name: Notify pipeline result
-    needs: [lint, test, security, trivy, build, trivy_image, publish]
+    needs: [test, security, trivy, build, trivy_image, publish]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
       WEBHOOK: ${{ secrets.NOTIFY_WEBHOOK_URL }}
     steps:
-      # Monta a mensagem conforme o resultado dos jobs
       - name: Compose message
         id: msg
         run: |
-          if [ "${{ needs.lint.result }}" = "success" ] \
-            && [ "${{ needs.test.result }}" = "success" ] \
+          if [ "${{ needs.test.result }}" = "success" ] \
             && [ "${{ needs.security.result }}" = "success" ] \
             && [ "${{ needs.trivy.result }}" = "success" ] \
             && [ "${{ needs.build.result }}" != "failure" ] \
@@ -261,7 +276,6 @@ jobs:
             echo "color=15158332"   >> "$GITHUB_OUTPUT"
           fi
 
-      # Envia o payload JSON para o webhook configurado
       - name: Send webhook
         if: env.WEBHOOK != ''
         env:
