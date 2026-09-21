@@ -2,15 +2,12 @@
 # CD - Blue/Green (deploy por cor)
 # =============================================================================
 # Fluxo:
-#   1. Build + push da imagem para o GHCR
+#   1. Build + push da imagem
 #   2. SSH na EC2
-#   3. Cria imagePullSecret no namespace blue-green
-#   4. Aplica o rbac.yaml (ServiceAccount + Role + RoleBinding)
-#   5. Aplica os Services + Ingress
-#   6. Aplica o deployment da cor alvo
-#   7. Smoke test direto no pod da cor
-#
-# Uso: Actions → CD - Blue/Green (deploy por cor) → Run workflow
+#   3. Aplica Postgres do blue-green (Secret + Service + StatefulSet)
+#   4. Aplica Services + Ingress + RBAC
+#   5. Aplica deployment da cor alvo
+#   6. Smoke test no slot
 # =============================================================================
 name: CD - Blue/Green (deploy por cor)
 
@@ -94,13 +91,15 @@ jobs:
           sed -i "s|IMAGE_PLACEHOLDER|${{ env.IMAGE_NAME }}|g" \
             k8s/blue-green/deployment-${{ inputs.color }}.yaml
 
-      # Copia o rbac.yaml + os manifestos base + o deployment da cor.
       - name: Copiar manifestos base e o da cor
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ec2-user@${{ vars.EC2_PUBLIC_IP }} "mkdir -p ~/blue-green"
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             k8s/blue-green/rbac.yaml \
+            k8s/blue-green/postgres-secret.yaml \
+            k8s/blue-green/postgres-service.yaml \
+            k8s/blue-green/postgres-statefulset.yaml \
             k8s/blue-green/service-blue.yaml \
             k8s/blue-green/service-green.yaml \
             k8s/blue-green/service-active.yaml \
@@ -108,7 +107,6 @@ jobs:
             k8s/blue-green/deployment-${{ inputs.color }}.yaml \
             ec2-user@${{ vars.EC2_PUBLIC_IP }}:/home/ec2-user/blue-green/
 
-      # Cria/atualiza o imagePullSecret no namespace blue-green.
       - name: Criar imagePullSecret no namespace blue-green
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
@@ -119,8 +117,16 @@ jobs:
                --docker-password=${{ secrets.GITHUB_TOKEN }} \
                --dry-run=client -o yaml | /usr/local/bin/kubectl apply -f -"
 
-      # Aplica rbac primeiro (SA), depois services + ingress, depois o deployment.
-      # A ordem importa: o deployment referencia a ServiceAccount `todolist-sa`.
+      # Aplica Postgres do blue-green primeiro
+      - name: Aplicar Postgres do blue-green
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }} \
+            '/usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/postgres-secret.yaml && \
+             /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/postgres-service.yaml && \
+             /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/postgres-statefulset.yaml && \
+             /usr/local/bin/kubectl -n blue-green rollout status statefulset/postgres --timeout=180s'
+
       - name: Aplicar base + deployment da cor
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
@@ -138,5 +144,5 @@ jobs:
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ec2-user@${{ vars.EC2_PUBLIC_IP }} \
             '/usr/local/bin/kubectl -n blue-green run smoke-${{ inputs.color }} \
-               --rm -i --restart=Never --image=curlimages/curl -- \
+               --rm -i --restart=never --image=curlimages/curl -- \
                curl -sf http://todolist-${{ inputs.color }}:5000/healthz'
