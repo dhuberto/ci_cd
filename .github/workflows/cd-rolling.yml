@@ -4,13 +4,9 @@
 # Fluxo:
 #   1. Build + push da imagem para o GHCR
 #   2. SSH na EC2
-#   3. Cria imagePullSecret no namespace rolling (a imagem é privada)
-#   4. Aplica o rbac.yaml (ServiceAccount + Role + RoleBinding) — para a rota /pods
-#   5. Aplica os manifestos (deployment + service + ingress)
-#   6. Aguarda rollout
-#   7. Smoke test via Ingress
-#
-# Uso: Actions → CD - Rolling Update → Run workflow → image_tag: latest
+#   3. Aplica Postgres (Secret + Service + StatefulSet) no namespace rolling
+#   4. Aplica app (Deployment + Service + Ingress)
+#   5. Smoke test via Ingress
 # =============================================================================
 name: CD - Rolling Update
 
@@ -31,7 +27,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Se image_tag for 'latest', usa o SHA do commit. Caso contrário, usa o valor.
   IMAGE_TAG: ${{ inputs.image_tag == 'latest' && github.sha || inputs.image_tag }}
   IMAGE_NAME: ghcr.io/${{ github.repository }}:${{ inputs.image_tag == 'latest' && github.sha || inputs.image_tag }}
 
@@ -47,7 +42,6 @@ jobs:
       - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Login no GHCR com GITHUB_TOKEN (não precisa de secret extra).
       - name: Login GHCR
         uses: docker/login-action@v3
         with:
@@ -98,8 +92,6 @@ jobs:
             k8s/rolling/*.yaml \
             ec2-user@${{ vars.EC2_PUBLIC_IP }}:/home/ec2-user/rolling/
 
-      # Cria/atualiza o imagePullSecret no namespace rolling.
-      # Sem isso, o kubelet não consegue puxar a imagem privada do GHCR.
       - name: Criar imagePullSecret no namespace rolling
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
@@ -110,11 +102,19 @@ jobs:
                --docker-password=${{ secrets.GITHUB_TOKEN }} \
                --dry-run=client -o yaml | /usr/local/bin/kubectl apply -f -"
 
-      # Aplica o RBAC primeiro (ServiceAccount + Role + RoleBinding) para que a
-      # rota /pods do app tenha permissão de ler pods. Depois aplica o resto.
-      # Caminho absoluto do kubectl: o SSH não-interativo não carrega
-      # /etc/profile.d/, então 'kubectl' puro dá 'command not found'.
-      - name: Aplicar e aguardar rollout
+      # Aplica Postgres primeiro (Secret + Service + StatefulSet), espera
+      # o rollout, e só depois aplica a app. Senão a app sobe antes do banco.
+      - name: Aplicar Postgres
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ec2-user@${{ vars.EC2_PUBLIC_IP }} \
+            '/usr/local/bin/kubectl apply -f /home/ec2-user/rolling/postgres-secret.yaml && \
+             /usr/local/bin/kubectl apply -f /home/ec2-user/rolling/postgres-service.yaml && \
+             /usr/local/bin/kubectl apply -f /home/ec2-user/rolling/postgres-statefulset.yaml && \
+             /usr/local/bin/kubectl -n rolling rollout status statefulset/postgres --timeout=180s'
+
+      # Aplica RBAC (ServiceAccount + Role) e depois o restante dos manifestos
+      - name: Aplicar app + RBAC
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ec2-user@${{ vars.EC2_PUBLIC_IP }} \
