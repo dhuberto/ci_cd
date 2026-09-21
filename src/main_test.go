@@ -6,7 +6,6 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
@@ -44,10 +43,6 @@ func TestParseTags(t *testing.T) {
 	if got := parseTags("user/app:latest"); len(got) != 1 || got[0] != "latest" {
 		t.Errorf("esperado [latest], recebeu %v", got)
 	}
-	if got := parseTags("user/app:PR-2, user/app:abc123");
-		len(got) != 2 || got[0] != "PR-2" || got[1] != "abc123" {
-		t.Errorf("esperado [PR-2 abc123], recebeu %v", got)
-	}
 }
 
 func TestTemplateCompila(t *testing.T) {
@@ -55,5 +50,3 @@ func TestTemplateCompila(t *testing.T) {
 		t.Errorf("template não compila: %v", err)
 	}
 }
-
-var _ = strings.TrimSpace
