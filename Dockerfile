@@ -2,6 +2,9 @@
 # Dockerfile — TodoList (Go + PostgreSQL)
 # =============================================================================
 # Multi-stage: builder Go estático + Alpine final. Imagem ~20 MB.
+#
+# O go.sum é gerado pelo workflow (go mod tidy) antes do docker build.
+# Se não existir, o builder roda go mod tidy dentro do container.
 # =============================================================================
 
 # ---------- Stage 1: builder ----------
@@ -9,11 +12,14 @@ FROM golang:alpine AS builder
 
 WORKDIR /build
 
-COPY go.mod go.sum ./
-RUN go mod download
+# Copia o código primeiro (inclui go.mod/go.sum, se existirem).
+COPY . .
 
-COPY src/ ./src/
+# Se o go.sum não existir, gera. Depois baixa as dependências.
+RUN if [ ! -f go.sum ]; then go mod tidy; fi && \
+    go mod download
 
+# Compila o binário estático.
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/todolist ./src
 
 # ---------- Stage 2: final ----------
