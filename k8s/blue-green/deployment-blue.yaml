@@ -1,12 +1,6 @@
 # =============================================================================
 # deployment-blue.yaml — slot BLUE
 # =============================================================================
-# APP_COLOR=blue faz a interface ficar azul quando o slot está ativo.
-# labels slot=blue casam com o Service todolist-blue e com o selector
-# do Service todolist-active (durante o switch).
-#
-# serviceAccountName: todolist-sa — identidade para a rota /pods.
-# =============================================================================
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,7 +21,6 @@ spec:
         app: todolist
         slot: blue
     spec:
-      # ServiceAccount para a rota /pods consultar a API do k8s.
       serviceAccountName: todolist-sa
       containers:
         - name: app
@@ -42,8 +35,16 @@ spec:
               value: "blue"
             - name: APP_PORT
               value: "5000"
-            - name: SESSION_KEY
-              value: "blue-session-key"
+            - name: DB_HOST
+              value: "postgres"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: "appuser"
+            - name: DB_PASSWORD
+              value: "mudar123"
+            - name: DB_NAME
+              value: "appdb"
           readinessProbe:
             httpGet:
               path: /healthz
