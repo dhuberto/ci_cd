@@ -1,20 +1,37 @@
-FROM python:3.11-slim
+# =============================================================================
+# Dockerfile — TodoList (Go + PostgreSQL)
+# =============================================================================
+# Multi-stage: builder Go estático + Alpine final. Imagem ~20 MB.
+# =============================================================================
+
+# ---------- Stage 1: builder ----------
+FROM golang:alpine AS builder
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY src/ ./src/
+
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/todolist ./src
+
+# ---------- Stage 2: final ----------
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates
 
 WORKDIR /app
+COPY --from=builder /build/todolist /app/todolist
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && pip install --no-cache-dir -r requirements.txt
+RUN addgroup -g 1001 -S appgroup && \
+    adduser  -S appuser -u 1001 -G appgroup
 
-COPY app.py .
-
-RUN mkdir -p /data
-
-# Docker image tags this build was published under, injected by CI at build time.
-# Empty by default so local builds show no tags in the app footer.
-ARG IMAGE_TAGS=""
-ENV IMAGE_TAGS=$IMAGE_TAGS
+USER appuser
 
 EXPOSE 5000
 
-CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${APP_PORT:-5000} app:app"]
+ARG IMAGE_TAGS=""
+ENV IMAGE_TAGS=$IMAGE_TAGS
+
+CMD ["/app/todolist"]
