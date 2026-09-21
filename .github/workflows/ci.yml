@@ -15,10 +15,10 @@
 name: CI
 
 on:
-  #push:
-    #branches: [main]
-  #pull_request:
-    #branches: [main]
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -54,8 +54,10 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache: false      # desligado porque o go.sum pode não existir
 
-      # Gera o go.sum (se não existir) e valida o go.mod.
+      # Gera o go.sum (se o código existir) e valida o go.mod.
       # Se o go.mod não estiver na raiz, cria um mínimo.
+      # O `cat go.sum` é protegido por `if [ -f go.sum ]` para não falhar
+      # quando ainda não há código-fonte em ./src.
       - name: Preparar módulo Go (go mod tidy)
         run: |
           if [ ! -f go.mod ]; then
@@ -72,7 +74,13 @@ jobs:
           echo "=== go.mod ==="
           cat go.mod
           echo "=== go.sum ==="
-          cat go.sum
+          if [ -f go.sum ]; then
+            cat go.sum
+          else
+            echo "(go.sum ainda não foi criado — sem código-fonte em ./src)"
+          fi
+          echo "=== arquivos .go encontrados ==="
+          find . -name "*.go" -not -path "./vendor/*"
 
       - name: go vet
         run: go vet ./...
@@ -313,6 +321,7 @@ jobs:
     env:
       WEBHOOK: ${{ secrets.NOTIFY_WEBHOOK_URL }}
     steps:
+      # Monta a mensagem conforme o resultado dos jobs
       - name: Compose message
         id: msg
         run: |
@@ -329,6 +338,7 @@ jobs:
             echo "color=15158332"   >> "$GITHUB_OUTPUT"
           fi
 
+      # Envia o payload JSON para o webhook configurado
       - name: Send webhook
         if: env.WEBHOOK != ''
         env:
