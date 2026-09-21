@@ -2,7 +2,6 @@
 // main.go — TodoList (Go + PostgreSQL)
 // =============================================================================
 // Aplicação web minimalista que cadastra nomes em um banco Postgres.
-// Mesma stack do repositório dhuberto/docker.
 //
 // Stack:
 //   - net/http (stdlib)  → servidor HTTP
@@ -10,18 +9,11 @@
 //   - database/sql       → camada de banco
 //   - github.com/lib/pq  → driver Postgres (única dependência)
 //
-// Variáveis de ambiente:
-//   DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME → conexão Postgres
-//   APP_NAME   → título exibido na interface (default: "TodoList")
-//   APP_PORT   → porta HTTP (default: 5000)
-//   APP_COLOR  → cor do tema (purple/blue/green/...)
-//   IMAGE_TAGS → tags da imagem, injetadas pelo CI no build
-//
 // Rotas:
 //   GET  /              → lista nomes + formulário
 //   POST /cadastrar     → insere um nome
 //   GET  /excluir/{id}  → remove um nome
-//   GET  /healthz       → health check (usado pelo Kubernetes)
+//   GET  /healthz       → health check (Kubernetes)
 // =============================================================================
 
 package main
@@ -39,10 +31,6 @@ import (
 
 	_ "github.com/lib/pq"
 )
-
-// -----------------------------------------------------------------------------
-// Tipos e estado global
-// -----------------------------------------------------------------------------
 
 type Nome struct {
 	ID   int
@@ -66,12 +54,6 @@ var (
 	appColor string
 	tags     []string
 )
-
-// -----------------------------------------------------------------------------
-// Template HTML
-// -----------------------------------------------------------------------------
-// Layout minimalista, com a cor vinda de APP_COLOR (essencial para o
-// Blue/Green: cada slot pinta a interface de uma cor).
 
 const pageTemplate = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -121,11 +103,6 @@ const pageTemplate = `<!DOCTYPE html>
 </body>
 </html>`
 
-// -----------------------------------------------------------------------------
-// Configuração
-// -----------------------------------------------------------------------------
-
-// env lê variável de ambiente ou retorna default.
 func env(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -133,7 +110,6 @@ func env(key, def string) string {
 	return def
 }
 
-// parseTags transforma "user/app:a,user/app:b" em ["a", "b"].
 func parseTags(raw string) []string {
 	raw = strings.ReplaceAll(raw, ",", "\n")
 	var out []string
@@ -150,10 +126,6 @@ func parseTags(raw string) []string {
 	}
 	return out
 }
-
-// -----------------------------------------------------------------------------
-// Banco
-// -----------------------------------------------------------------------------
 
 func openDB() (*sql.DB, error) {
 	dsn := fmt.Sprintf(
@@ -192,16 +164,11 @@ func waitForDB() {
 	log.Fatal("Banco não ficou pronto a tempo")
 }
 
-// -----------------------------------------------------------------------------
-// Handlers
-// -----------------------------------------------------------------------------
-
 func index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
-
 	data := pageData{
 		AppName:    appName,
 		Color:      appColor,
@@ -209,7 +176,6 @@ func index(w http.ResponseWriter, r *http.Request) {
 		StatusText: "ONLINE",
 		ImageTags:  tags,
 	}
-
 	rows, err := db.Query("SELECT id, nome FROM nomes ORDER BY created_at DESC")
 	if err != nil {
 		log.Printf("Erro ao listar: %v", err)
@@ -225,7 +191,6 @@ func index(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.Execute(w, data); err != nil {
 		log.Printf("Erro ao renderizar: %v", err)
@@ -276,9 +241,9 @@ func healthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
-// -----------------------------------------------------------------------------
-// Main
-// -----------------------------------------------------------------------------
+func parseTemplateForTest() (*template.Template, error) {
+	return template.New("page").Parse(pageTemplate)
+}
 
 func main() {
 	appName = env("APP_NAME", "TodoList")
@@ -291,13 +256,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Erro no template: %v", err)
 	}
-
 	db, err = openDB()
 	if err != nil {
 		log.Fatalf("Erro ao abrir DB: %v", err)
 	}
 	defer db.Close()
-
 	waitForDB()
 
 	mux := http.NewServeMux()
