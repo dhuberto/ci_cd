@@ -1,7 +1,7 @@
 # =============================================================================
 # CD - Blue/Green (switch de tráfego)
 # =============================================================================
-# Faz o cutover: troca o selector do Service "todolist-active" para a cor
+# Faz o cutover: troca o selector do Service "app-go-active" para a cor
 # informada. É o ÚNICO ponto de mudança entre blue e green — mudança
 # atômica, reversível, sem recriar pods nem esperar rollout.
 #
@@ -46,14 +46,14 @@ jobs:
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ec2-user@${{ vars.EC2_PUBLIC_IP }} \
             '/usr/local/bin/kubectl -n blue-green patch svc app-go-active \
-               -p "{\"spec\":{\"selector\":{\"app\":\"todolist\",\"slot\":\"${{ inputs.color }}\"}}}"'
+               -p "{\"spec\":{\"selector\":{\"app\":\"app-go\",\"slot\":\"${{ inputs.color }}\"}}}"'
 
       # Confirma que o selector foi realmente trocado.
       - name: Confirmar selector
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ec2-user@${{ vars.EC2_PUBLIC_IP }} \
-            '/usr/local/bin/kubectl -n blue-green get svc todolist-active \
+            '/usr/local/bin/kubectl -n blue-green get svc app-go-active \
                -o jsonpath="{.spec.selector}"'
 
       # Valida o caminho completo: navegador → ingress → active → pod.
@@ -79,7 +79,7 @@ jobs:
             echo "### Switch concluído"
             echo ""
             echo "- Cor ativa agora: \`${{ inputs.color }}\`"
-            echo "- Serviço de tráfego: \`todolist-active\` → \`slot=${{ inputs.color }}\`"
+            echo "- Serviço de tráfego: \`app-go-active\` → \`slot=${{ inputs.color }}\`"
             echo "- Host: \`todolist.local\`"
             echo ""
             echo "**Rollback:** rode este workflow novamente com a cor contrária."
