@@ -7,10 +7,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: todolist
+  name: app-go
   namespace: rolling
   labels:
-    app: todolist
+    app: app-go
 spec:
   replicas: 3
   strategy:
@@ -20,13 +20,13 @@ spec:
       maxSurge: 1
   selector:
     matchLabels:
-      app: todolist
+      app: app-go
   template:
     metadata:
       labels:
-        app: todolist
+        app: app-go
     spec:
-      serviceAccountName: todolist-sa
+      serviceAccountName: app-go-sa
       containers:
         - name: app
           image: IMAGE_PLACEHOLDER
@@ -35,7 +35,7 @@ spec:
             - containerPort: 5000
           env:
             - name: APP_NAME
-              value: "TodoList Rolling"
+              value: "APP-GO Rolling"
             - name: APP_COLOR
               value: "purple"
             - name: APP_PORT
