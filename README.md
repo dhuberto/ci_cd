@@ -1,21 +1,21 @@
 # CI/CD — App-go Go + PostgreSQL + Docker + KIND + AWS
 
-```html
+---
 [![CI](https://github.com/dhuberto/ci_cd/actions/workflows/ci.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/ci.yml)
-
+---
 [![Rolling](https://github.com/dhuberto/ci_cd/actions/workflows/cd-rolling.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/cd-rolling.yml)
-
+---
 [![Blue-Green-Switch](https://github.com/dhuberto/ci_cd/actions/workflows/cd-blue-green-switch.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/cd-blue-green-switch.yml)
-
+---
 [![App-blue-green](https://github.com/dhuberto/ci_cd/actions/workflows/cd-blue-green.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/cd-blue-green.yml)
-
+---
 [![Destroy-full](https://github.com/dhuberto/ci_cd/actions/workflows/cd-destroy-full.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/cd-destroy-full.yml)
-
+---
 [![Destroy](https://github.com/dhuberto/ci_cd/actions/workflows/cd-destroy.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/cd-destroy.yml)
-
+---
 [![provision](https://github.com/dhuberto/ci_cd/actions/workflows/cd-provision.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/cd-provision.yml)
-```
 
+---
 
 Pipeline completo de **CI/CD** para uma aplicação web em **Go + PostgreSQL**,
 com deploy automatizado em **Kubernetes** (cluster `kind` em EC2) usando
