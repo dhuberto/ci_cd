@@ -1,27 +1,31 @@
 # =============================================================================
 # deployment-blue.yaml — slot BLUE
 # =============================================================================
+# APP_COLOR=blue faz a interface ficar azul quando o slot está ativo.
+# labels slot=blue casam com o Service app-go-blue e com o selector
+# do Service app-go-active (durante o switch).
+# =============================================================================
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: todolist-blue
+  name: app-go-blue
   namespace: blue-green
   labels:
-    app: todolist
+    app: app-go
     slot: blue
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: todolist
+      app: app-go
       slot: blue
   template:
     metadata:
       labels:
-        app: todolist
+        app: app-go
         slot: blue
     spec:
-      serviceAccountName: todolist-sa
+      serviceAccountName: app-go-sa
       containers:
         - name: app
           image: IMAGE_PLACEHOLDER
@@ -30,7 +34,7 @@ spec:
             - containerPort: 5000
           env:
             - name: APP_NAME
-              value: "TodoList Blue"
+              value: "APP-GO Blue"
             - name: APP_COLOR
               value: "blue"
             - name: APP_PORT
