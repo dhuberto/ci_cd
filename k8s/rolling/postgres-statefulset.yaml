@@ -1,8 +1,7 @@
 # =============================================================================
-# postgres-statefulset.yaml — Postgres com persistência
+# postgres-statefulset.yaml — Postgres com persistência (namespace rolling)
 # =============================================================================
-# StatefulSet com 1 réplica (não escala horizontalmente sem configuração
-# extra). PVC de 1Gi via StorageClass `local-path` (default do kind).
+# StatefulSet com 1 réplica. PVC de 1Gi via StorageClass `local-path`.
 # =============================================================================
 apiVersion: apps/v1
 kind: StatefulSet
