@@ -1,5 +1,5 @@
 # =============================================================================
-# postgres-statefulset.yaml — Postgres (namespace blue-green)
+# postgres-statefulset.yaml — Postgres com persistência (namespace blue-green)
 # =============================================================================
 apiVersion: apps/v1
 kind: StatefulSet
