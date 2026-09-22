@@ -1,15 +1,20 @@
-# Único Service que o Ingress enxerga.
-# O switch de tráfego troca APENAS o selector deste Service — cutover mínimo
-# e reversível, sem recriar manifestos.
+# =============================================================================
+# service-active.yaml — Service ativo do Blue/Green
+# =============================================================================
+# O switch de tráfego troca APENAS o selector deste Service.
+# O Ingress aponta para ele, e ele aponta para o slot ativo.
+# =============================================================================
 apiVersion: v1
 kind: Service
 metadata:
-  name: todolist-active
+  name: app-go-active
   namespace: blue-green
+  labels:
+    app: app-go
 spec:
   type: ClusterIP
   selector:
-    app: todolist
+    app: app-go
     slot: blue          # <- trocado pelo workflow cd-blue-green-switch.yml
   ports:
     - name: http
