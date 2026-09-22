@@ -1,23 +1,24 @@
 # =============================================================================
-# ingress.yaml — Ingress que expõe rolling.local
+# ingress.yaml — Ingress do Blue/Green
 # =============================================================================
-# O backend aponta para o Service `app-go` do namespace rolling.
+# Aponta sempre para o Service `app-go-active`.
+# Host: app-go.local (substitui o antigo todolist.local).
 # =============================================================================
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: app-go
-  namespace: rolling
+  namespace: blue-green
 spec:
   ingressClassName: nginx
   rules:
-    - host: rolling.local
+    - host: app-go.local
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: app-go
+                name: app-go-active
                 port:
                   number: 5000
