@@ -6,7 +6,7 @@
 #   2. SSH na EC2
 #   3. Aplica Postgres do blue-green (Secret + Service + StatefulSet)
 #   4. Aplica Services + Ingress + RBAC
-#   5. Aplica deployment da cor alvo
+#   5. Aplica deployment da cor alvo (app-go-blue / app-go-green)
 #   6. Smoke test no slot
 # =============================================================================
 name: CD - Blue/Green (deploy por cor)
@@ -145,6 +145,8 @@ jobs:
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/postgres-statefulset.yaml && \
              /usr/local/bin/kubectl -n blue-green rollout status statefulset/postgres --timeout=180s'
 
+      # Aplica RBAC + Services + Ingress + Deployment da cor.
+      # O rollout status aponta para app-go-<cor>.
       - name: Aplicar base + deployment da cor
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
@@ -155,10 +157,9 @@ jobs:
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/service-active.yaml && \
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/ingress.yaml && \
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/deployment-${{ inputs.color }}.yaml && \
-             /usr/local/bin/kubectl -n blue-green rollout status deploy/todolist-${{ inputs.color }} --timeout=180s'
+             /usr/local/bin/kubectl -n blue-green rollout status deploy/app-go-${{ inputs.color }} --timeout=180s'
 
-      # Smoke test no slot da cor alvo.
-      # --restart=Never com N maiúsculo — o Kubernetes é case-sensitive.
+      # Smoke test: aponta para o Service app-go-<cor> (não mais todolist-<cor>).
       - name: Smoke test no slot
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
