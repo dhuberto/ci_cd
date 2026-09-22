@@ -1,13 +1,18 @@
-# Service do slot green — idem, usado pelo smoke test antes do switch.
+# =============================================================================
+# service-green.yaml — Service ClusterIP do slot green
+# =============================================================================
 apiVersion: v1
 kind: Service
 metadata:
-  name: todolist-green
+  name: app-go-green
   namespace: blue-green
+  labels:
+    app: app-go
+    slot: green
 spec:
   type: ClusterIP
   selector:
-    app: todolist
+    app: app-go
     slot: green
   ports:
     - name: http
