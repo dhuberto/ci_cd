@@ -1,14 +1,18 @@
-# Service do slot blue — usado apenas pelo smoke test direto no pod,
-# para validar a cor ANTES de fazer o switch de tráfego.
+# =============================================================================
+# service-blue.yaml — Service ClusterIP do slot blue
+# =============================================================================
 apiVersion: v1
 kind: Service
 metadata:
-  name: todolist-blue
+  name: app-go-blue
   namespace: blue-green
+  labels:
+    app: app-go
+    slot: blue
 spec:
   type: ClusterIP
   selector:
-    app: todolist
+    app: app-go
     slot: blue
   ports:
     - name: http
