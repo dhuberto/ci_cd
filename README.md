@@ -1,6 +1,6 @@
 # CI/CD — App-go Go + PostgreSQL + Docker + KIND + AWS
 
-```
+```html
 [![CI](https://github.com/dhuberto/ci_cd/actions/workflows/ci.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/ci.yml)
 
 [![Rolling](https://github.com/dhuberto/ci_cd/actions/workflows/cd-rolling.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/cd-rolling.yml)
