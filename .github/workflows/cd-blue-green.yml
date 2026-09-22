@@ -2,7 +2,7 @@
 # CD - Blue/Green (deploy por cor)
 # =============================================================================
 # Fluxo:
-#   1. Build + push da imagem (gera go.sum antes)
+#   1. Build + push da imagem para o GHCR
 #   2. SSH na EC2
 #   3. Aplica Postgres do blue-green (Secret + Service + StatefulSet)
 #   4. Aplica Services + Ingress + RBAC
@@ -48,19 +48,19 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.25'
           cache: false
 
       - name: Preparar módulo Go (go mod tidy)
         run: |
           if [ ! -f go.mod ]; then
-            cat > go.mod <<'EOF'
-          module app-go
-
-          go 1.22
-
-          require github.com/lib/pq v1.10.9
-          EOF
+            printf '%s\n' \
+              'module app-go' \
+              '' \
+              'go 1.25' \
+              '' \
+              'require github.com/lib/pq v1.10.9' \
+              > go.mod
           fi
           go mod tidy
 
@@ -157,10 +157,12 @@ jobs:
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/deployment-${{ inputs.color }}.yaml && \
              /usr/local/bin/kubectl -n blue-green rollout status deploy/todolist-${{ inputs.color }} --timeout=180s'
 
+      # Smoke test no slot da cor alvo.
+      # --restart=Never com N maiúsculo — o Kubernetes é case-sensitive.
       - name: Smoke test no slot
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ec2-user@${{ vars.EC2_PUBLIC_IP }} \
             '/usr/local/bin/kubectl -n blue-green run smoke-${{ inputs.color }} \
-               --rm -i --restart=never --image=curlimages/curl -- \
+               --rm -i --restart=Never --image=curlimages/curl -- \
                curl -sf http://todolist-${{ inputs.color }}:5000/healthz'
