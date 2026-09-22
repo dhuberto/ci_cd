@@ -42,20 +42,21 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.25'
           cache: false
 
-      # Gera go.sum antes do build.
+      # Gera go.sum antes do build (usa printf para não sofrer com
+      # indentação do YAML).
       - name: Preparar módulo Go (go mod tidy)
         run: |
           if [ ! -f go.mod ]; then
-            cat > go.mod <<'EOF'
-          module app-go
-
-          go 1.22
-
-          require github.com/lib/pq v1.10.9
-          EOF
+            printf '%s\n' \
+              'module app-go' \
+              '' \
+              'go 1.25' \
+              '' \
+              'require github.com/lib/pq v1.10.9' \
+              > go.mod
           fi
           go mod tidy
 
@@ -131,6 +132,8 @@ jobs:
              /usr/local/bin/kubectl apply -f /home/ec2-user/rolling/postgres-statefulset.yaml && \
              /usr/local/bin/kubectl -n rolling rollout status statefulset/postgres --timeout=180s'
 
+      # Aplica RBAC + Deployments + Services + Ingress.
+      # O rollout status aponta para o Deployment `app-go`.
       - name: Aplicar app + RBAC
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
