@@ -5,9 +5,14 @@
 #   1. Build + push da imagem para o GHCR
 #   2. SSH na EC2
 #   3. Aplica Postgres do blue-green (Secret + Service + StatefulSet)
-#   4. Aplica Services + Ingress + RBAC
+#   4. Aplica Services + Ingress (switch + dedicados azul/verde) + RBAC
 #   5. Aplica deployment da cor alvo (app-go-blue / app-go-green)
 #   6. Smoke test no slot
+#
+# Ingress aplicados neste workflow:
+#   - app-go.local        → Service app-go-active (muda com o switch)
+#   - app-go-azul.local   → Service app-go-blue   (fixo no azul)
+#   - app-go-verde.local  → Service app-go-green  (fixo no verde)
 # =============================================================================
 name: CD - Blue/Green (deploy por cor)
 
@@ -110,6 +115,7 @@ jobs:
           sed -i "s|IMAGE_PLACEHOLDER|${{ env.IMAGE_NAME }}|g" \
             k8s/blue-green/deployment-${{ inputs.color }}.yaml
 
+      # Copia os 11 manifestos base + os 2 Ingress dedicados + o deployment da cor.
       - name: Copiar manifestos base e o da cor
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
@@ -123,6 +129,8 @@ jobs:
             k8s/blue-green/service-green.yaml \
             k8s/blue-green/service-active.yaml \
             k8s/blue-green/ingress.yaml \
+            k8s/blue-green/ingress-blue.yaml \
+            k8s/blue-green/ingress-green.yaml \
             k8s/blue-green/deployment-${{ inputs.color }}.yaml \
             ec2-user@${{ vars.EC2_PUBLIC_IP }}:/home/ec2-user/blue-green/
 
@@ -145,7 +153,7 @@ jobs:
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/postgres-statefulset.yaml && \
              /usr/local/bin/kubectl -n blue-green rollout status statefulset/postgres --timeout=180s'
 
-      # Aplica RBAC + Services + Ingress + Deployment da cor.
+      # Aplica RBAC + Services + 3 Ingress (active, blue, green) + Deployment da cor.
       # O rollout status aponta para app-go-<cor>.
       - name: Aplicar base + deployment da cor
         run: |
@@ -156,10 +164,12 @@ jobs:
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/service-green.yaml && \
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/service-active.yaml && \
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/ingress.yaml && \
+             /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/ingress-blue.yaml && \
+             /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/ingress-green.yaml && \
              /usr/local/bin/kubectl apply -f /home/ec2-user/blue-green/deployment-${{ inputs.color }}.yaml && \
              /usr/local/bin/kubectl -n blue-green rollout status deploy/app-go-${{ inputs.color }} --timeout=180s'
 
-      # Smoke test: aponta para o Service app-go-<cor> (não mais todolist-<cor>).
+      # Smoke test: aponta para o Service app-go-<cor>.
       - name: Smoke test no slot
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
