@@ -1,13 +1,19 @@
-# Service ClusterIP interno do Rolling — quem expõe para fora é o Ingress.
+# =============================================================================
+# service.yaml — Service ClusterIP do namespace rolling
+# =============================================================================
+# Selector `app: app-go` precisa bater com os labels do Deployment.
+# =============================================================================
 apiVersion: v1
 kind: Service
 metadata:
-  name: todolist
+  name: app-go
   namespace: rolling
+  labels:
+    app: app-go
 spec:
   type: ClusterIP
   selector:
-    app: todolist
+    app: app-go
   ports:
     - name: http
       port: 5000
