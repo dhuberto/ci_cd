@@ -1,21 +1,20 @@
 # =============================================================================
 # rbac.yaml — ServiceAccount + Role + RoleBinding (namespace blue-green)
 # =============================================================================
-# Mesma função do rbac.yaml do rolling, mas no namespace blue-green.
-# Permite que os pods todolist-blue e todolist-green consultem a API
-# do Kubernetes para a rota /pods.
+# A ServiceAccount `app-go-sa` é referenciada pelos Deployments
+# app-go-blue e app-go-green.
 # =============================================================================
 
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: todolist-sa
+  name: app-go-sa
   namespace: blue-green
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: todolist-pods-reader
+  name: app-go-pods-reader
   namespace: blue-green
 rules:
   - apiGroups: [""]
@@ -28,13 +27,13 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: todolist-pods-reader-binding
+  name: app-go-pods-reader-binding
   namespace: blue-green
 subjects:
   - kind: ServiceAccount
-    name: todolist-sa
+    name: app-go-sa
     namespace: blue-green
 roleRef:
   kind: Role
-  name: todolist-pods-reader
+  name: app-go-pods-reader
   apiGroup: rbac.authorization.k8s.io
