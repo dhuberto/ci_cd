@@ -1,27 +1,31 @@
 # =============================================================================
 # deployment-green.yaml — slot GREEN
 # =============================================================================
+# APP_COLOR=green faz a interface ficar verde quando o slot está ativo.
+# labels slot=green casam com o Service app-go-green e com o selector
+# do Service app-go-active (durante o switch).
+# =============================================================================
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: todolist-green
+  name: app-go-green
   namespace: blue-green
   labels:
-    app: todolist
+    app: app-go
     slot: green
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: todolist
+      app: app-go
       slot: green
   template:
     metadata:
       labels:
-        app: todolist
+        app: app-go
         slot: green
     spec:
-      serviceAccountName: todolist-sa
+      serviceAccountName: app-go-sa
       containers:
         - name: app
           image: IMAGE_PLACEHOLDER
@@ -30,7 +34,7 @@ spec:
             - containerPort: 5000
           env:
             - name: APP_NAME
-              value: "TodoList Green"
+              value: "APP-GO Green"
             - name: APP_COLOR
               value: "green"
             - name: APP_PORT
