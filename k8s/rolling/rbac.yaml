@@ -1,27 +1,21 @@
 # =============================================================================
-# rbac.yaml — ServiceAccount + Role + RoleBinding para a rota /pods
+# rbac.yaml — ServiceAccount + Role + RoleBinding (namespace rolling)
 # =============================================================================
-# O app.py (versão do ci_cd_docker) expõe a rota /pods, que consulta a API
-# do Kubernetes. Para isso o pod precisa de uma identidade (ServiceAccount)
-# com permissão de leitura em pods. Sem isso, a rota mostra
-# "Unable to query the Kubernetes API".
-#
-# Escopo mínimo: Role (namespace-scoped), não ClusterRole. Permite apenas
-# "get" e "list" em pods e namespaces, dentro do namespace rolling.
+# A ServiceAccount `app-go-sa` é referenciada pelo Deployment em rolling.
+# Escopo mínimo: Role (namespace-scoped), só "get" e "list" em pods e
+# namespaces.
 # =============================================================================
 
-# Identidade que o pod vai usar para falar com a API do k8s.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: todolist-sa
+  name: app-go-sa
   namespace: rolling
 ---
-# Role: define o que a ServiceAccount pode fazer (só leitura em pods e namespaces).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: todolist-pods-reader
+  name: app-go-pods-reader
   namespace: rolling
 rules:
   - apiGroups: [""]
@@ -31,17 +25,16 @@ rules:
     resources: ["namespaces"]
     verbs: ["get", "list"]
 ---
-# RoleBinding: liga a ServiceAccount `todolist-sa` à Role `todolist-pods-reader`.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: todolist-pods-reader-binding
+  name: app-go-pods-reader-binding
   namespace: rolling
 subjects:
   - kind: ServiceAccount
-    name: todolist-sa
+    name: app-go-sa
     namespace: rolling
 roleRef:
   kind: Role
-  name: todolist-pods-reader
+  name: app-go-pods-reader
   apiGroup: rbac.authorization.k8s.io
