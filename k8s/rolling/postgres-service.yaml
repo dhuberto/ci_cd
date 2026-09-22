@@ -1,8 +1,8 @@
 # =============================================================================
-# postgres-service.yaml — Service headless do Postgres
+# postgres-service.yaml — Service headless do Postgres (namespace rolling)
 # =============================================================================
-# clusterIP: None porque o StatefulSet precisa de um Service headless
-# para DNS estável (postgres-0.postgres.rolling.svc.cluster.local).
+# clusterIP: None porque o StatefulSet precisa de DNS estável
+# (postgres-0.postgres.rolling.svc.cluster.local).
 # =============================================================================
 apiVersion: v1
 kind: Service
