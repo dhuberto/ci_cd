@@ -1,5 +1,5 @@
 # =============================================================================
-# postgres-service.yaml — Service headless (namespace blue-green)
+# postgres-service.yaml — Service headless do Postgres (namespace blue-green)
 # =============================================================================
 apiVersion: v1
 kind: Service
