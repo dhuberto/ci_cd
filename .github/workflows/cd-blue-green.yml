@@ -165,4 +165,4 @@ jobs:
             ec2-user@${{ vars.EC2_PUBLIC_IP }} \
             '/usr/local/bin/kubectl -n blue-green run smoke-${{ inputs.color }} \
                --rm -i --restart=Never --image=curlimages/curl -- \
-               curl -sf http://todolist-${{ inputs.color }}:5000/healthz'
+               curl -sf http://app-go-${{ inputs.color }}:5000/healthz'
