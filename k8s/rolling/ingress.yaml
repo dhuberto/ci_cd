@@ -1,12 +1,13 @@
-# Ingress roteia host rolling.local → Service todolist.
-# curl -H "Host: rolling.local" http://<IP>/healthz usa este host.
+# =============================================================================
+# ingress.yaml — Ingress que expõe rolling.local
+# =============================================================================
+# O backend aponta para o Service `app-go` do namespace rolling.
+# =============================================================================
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: todolist
+  name: app-go
   namespace: rolling
-  annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
   ingressClassName: nginx
   rules:
@@ -17,6 +18,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: todolist
+                name: app-go
                 port:
                   number: 5000
