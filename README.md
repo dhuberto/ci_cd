@@ -1,4 +1,4 @@
-# CI/CD — app-go
+# CI/CD — App-go Go + PostgreSQL + Docker + KIND
 
 [![CI](https://github.com/dhuberto/ci_cd/actions/workflows/ci.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/ci.yml)
 
