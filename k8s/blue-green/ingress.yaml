@@ -1,12 +1,13 @@
-# Ingress do Blue/Green: aponta SEMPRE para o Service active,
-# e é o switch do selector do active que muda a cor em produção.
+# =============================================================================
+# ingress.yaml — Ingress do Blue/Green (todolist.local)
+# =============================================================================
+# Aponta sempre para o Service `app-go-active`.
+# =============================================================================
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: todolist
+  name: app-go
   namespace: blue-green
-  annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
   ingressClassName: nginx
   rules:
@@ -17,6 +18,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: todolist-active
+                name: app-go-active
                 port:
                   number: 5000
