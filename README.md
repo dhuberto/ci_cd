@@ -7,7 +7,6 @@
 [![Destroy-full](https://github.com/dhuberto/ci_cd/actions/workflows/cd-destroy-full.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/cd-destroy-full.yml)
 [![Destroy](https://github.com/dhuberto/ci_cd/actions/workflows/cd-destroy.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/cd-destroy.yml)
 [![provision](https://github.com/dhuberto/ci_cd/actions/workflows/cd-provision.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/cd-provision.yml)
-[![Reusable](https://github.com/dhuberto/ci_cd/actions/workflows/_reusable-test.yml/badge.svg)](https://github.com/dhuberto/ci_cd/actions/workflows/_reusable-test.yml)
 
 
 Pipeline completo de **CI/CD** para uma aplicação web em **Go + PostgreSQL**,
